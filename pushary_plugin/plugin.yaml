@@ -1,0 +1,21 @@
+name: pushary
+version: 0.5.3
+description: Push notifications and human-in-the-loop for Hermes Agent via Pushary
+author: RalphNex OU
+provides_tools:
+  - pushary_notify
+  - pushary_ask
+  - pushary_wait
+  - pushary_cancel
+  - pushary_propose_scope
+  - pushary_enroll
+  - pushary_ask_end_user
+provides_hooks:
+  - pre_llm_call
+  - pre_tool_call
+  - post_tool_call
+  - on_session_start
+  - on_session_end
+  - on_session_finalize
+provides_approval_transports:
+  - pushary
