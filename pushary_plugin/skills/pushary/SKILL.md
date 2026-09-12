@@ -1,7 +1,7 @@
 ---
 name: pushary-hermes
-version: 0.8.0
-description: Push notifications and human-in-the-loop for Hermes Agent. Use this whenever a running agent needs a human and no chat session is active, such as before an irreversible or destructive action, before spending money, deploying, force-pushing or deleting, when blocked on a decision outside your authority, when running unattended and you hit a genuine ambiguity, when another skill's workflow says to confirm with the user, and when a long task finishes or fails with nobody watching. Send alerts when tasks finish, ask questions (yes/no, multiple choice, or free text) via web push, and get answers from the user's lock screen. Use these tools proactively when the user is not actively in a chat session. Works alongside Hermes's built-in messaging platforms (Telegram, Discord, etc.) as a universal fallback channel.
+version: 0.8.1
+description: Push notifications and human-in-the-loop for Hermes Agent. Use this whenever a running agent needs a human and no chat session is active, such as before an irreversible or destructive action, before spending money, deploying, force-pushing or deleting, when blocked on a decision outside your authority, when running unattended and you hit a genuine ambiguity, when another skill's workflow says to confirm with the user, and when a long task finishes or fails with nobody watching. Send alerts when tasks finish, ask questions (yes/no, multiple choice, or free text) via web push, and get answers from their connected devices. Use these tools proactively when the user is not actively in a chat session. Works alongside Hermes's built-in messaging platforms (Telegram, Discord, etc.) as a universal fallback channel.
 metadata:
   hermes:
     tags: [notifications, push, human-in-the-loop, alerts, permissions]
@@ -16,9 +16,11 @@ metadata:
 
 # Pushary - Push Notifications for Hermes Agent
 
-Pushary adds web push notifications as a delivery channel for Hermes. Use it when the user is not actively monitoring a chat platform, or when you need to reach them on their phone's lock screen for a time-sensitive decision.
+Pushary adds mobile, Mac and browser delivery for Hermes. Use it when the user is not actively monitoring a chat platform, or when you need to reach them on their phone's lock screen for a time-sensitive decision.
 
 ## Ask in as Few Interruptions as Possible
+
+Honor authorization already granted in this session. Ask only for a missing decision or an action outside that authorization, or when an enforced host policy requires it. A multi-step task alone does not require plan approval. Never ask again merely because the next authorized step deletes, deploys or publishes something. These skills guide the agent; supported hooks and runtime approval gates enforce policy. Do not bypass an enforced gate.
 
 Every question costs the user their attention wherever they are. Before a run of more than a step or two, work out where you will need a human and fold those points together: one `select` carrying the real options beats three `confirm`s in a row, ask once at a boundary rather than once per instance, and never ask what you can determine yourself from the task or from a tool call you can make.
 
@@ -37,22 +39,19 @@ Every question costs the user their attention wherever they are. Before a run of
 - The question is part of an ongoing dialog
 - The user prefers responses in their current platform
 
-**Use both when:**
-- A critical error occurs - notify via push AND the active platform
-- A long-running task completes - push ensures they see it even if they closed the chat
+Use an extra push only when the user requested it or a meaningful unattended result needs attention. Do not assume you can detect whether a Telegram or Discord message was read.
 
 ## Setup
 
 ```bash
 npx @pushary/agent-hooks@latest setup --agents hermes
-export PUSHARY_API_KEY="pk_xxx.sk_xxx"
 ```
 
-That installs `hermes-plugin-pushary` into the interpreter Hermes runs in, enables it, and registers the tools natively. No MCP server config is needed. Sign up at https://pushary.com/sign-up?from=hermes to get your API key.
+That installs `hermes-plugin-pushary` into the interpreter Hermes runs in, enables it, and registers the tools natively. No MCP server config is needed. Setup pairs with the Pushary app; show the QR/link and verify the matching fingerprint. Existing credentials are reused. Run `npx @pushary/agent-hooks@latest doctor` afterward. Manual API-key configuration is a fallback, not another step after pairing.
 
 ## Approvals Go to the Phone
 
-The plugin registers `pushary` as a Hermes **approval transport**, so the dangerous-command approvals Hermes already asks for are answered from the lock screen with the same four choices the terminal offers: allow once, allow for this session, always allow, deny. Hermes owns the timeout (300 seconds by default) and remembers session and always decisions exactly as it would have.
+The plugin registers `pushary` as a Hermes **approval transport**, so the dangerous-command approvals Hermes already asks for open in the app with the same four choices the terminal offers: allow once, allow for this session, always allow, deny. Hermes owns the timeout (300 seconds by default) and remembers session and always decisions exactly as it would have.
 
 ```yaml
 security:
@@ -62,6 +61,19 @@ security:
 ```
 
 The fallback is what makes it safe to leave on: when no device is connected or Pushary is unreachable, Hermes falls back to its terminal prompt rather than denying the command. You do not call this yourself; it fires when Hermes decides a command needs a human.
+
+## Answer surfaces and account boundaries
+
+| Surface | What the user can do |
+| --- | --- |
+| Mobile app | Answer confirm, select and input questions. Supported confirm notifications offer approve/deny actions on the lock screen; arbitrary choices and text open the app. |
+| Mac notch | Answer personal account questions with confirm, select, input and question-set controls, including keyboard controls. Presence and delivery policy determine when the phone is also reached. |
+| Slack | Answer through buttons, menus or text modals when the integration and intended recipient are configured. |
+| Browser | Open the decision page as a fallback; browser notification delivery requires permission. |
+
+Personal setup connects the operator's devices. For a Mac, install from https://pushary.com/download, sign in to the same personal account and connect your agents in the app. Run `npx @pushary/agent-hooks@latest doctor`, then request one harmless test question and verify it reaches the intended surface. Test phone fallback while away from the Mac; do not infer delivery from a successful API call alone.
+
+Partner customers use scoped enrollment links issued by their application. Do not enroll them into the operator's account or send their decisions through personal tools. The Mac notch currently uses the personal account/session API; do not promise a Partner customer inbox on Mac. See https://pushary.com/docs/agents/embed for Partner setup.
 
 ## Tools
 
@@ -78,7 +90,10 @@ Send a one-way push notification. Optionally include structured context for a ri
 | title | string | Yes | Notification title (max 100 chars, aim for under 60) |
 | body | string | Yes | Notification body (max 500 chars, aim for under 200) |
 | agent_name | string | No | Identifies this Hermes instance (e.g., "Hermes - daily-briefing") |
-| context | object | Yes for task updates | Rich context with type, summary, details, filesChanged, errorMessage, nextSteps. `context.type` marks the notification a task update, and the user's setting for where task updates land can only route one that says so. |
+| context_type | "task_complete" / "error" / "info" | Yes for task updates | Marks the notification for task-update routing. |
+| summary | string | No | Short summary of the result. |
+| details / files_changed | string[] | No | Result details or changed paths. |
+| error_message / next_steps | string | No | Error or suggested follow-up. |
 
 **Example - cron task completed:**
 
@@ -86,13 +101,11 @@ Send a one-way push notification. Optionally include structured context for a ri
 {
   "title": "Daily briefing ready",
   "body": "Compiled 12 news items and 3 calendar events",
-  "agentName": "Hermes - daily-briefing",
-  "context": {
-    "type": "task_complete",
-    "summary": "Morning briefing compiled from RSS feeds and Google Calendar",
-    "details": ["12 tech news items", "3 meetings today", "2 PRs awaiting review"],
-    "nextSteps": "Say 'read briefing' in Telegram to hear the full summary"
-  }
+  "agent_name": "Hermes - daily-briefing",
+  "context_type": "task_complete",
+  "summary": "Morning briefing compiled from RSS feeds and Google Calendar",
+  "details": ["12 tech news items", "3 meetings today", "2 PRs awaiting review"],
+  "next_steps": "Say 'read briefing' in Telegram to hear the full summary"
 }
 ```
 
@@ -111,7 +124,7 @@ Ask a question via push notification and **wait for the answer** (blocks by defa
 | context | string | No | What you're working on, shown above the question |
 | agent_name | string | No | Identifies this Hermes instance |
 | wait | boolean | No | Wait for answer before returning (default: true) |
-| timeoutMs | integer | No | Max wait in ms (max 55000). Uses the site policy timeout if omitted. |
+| timeout_ms | integer | No | Max wait in ms (max 55000). Defaults to 30000 per poll attempt; server policy may hand off earlier. |
 
 **Returns:**
 - `{ "answered": true, "value": "yes" }` - user responded
@@ -124,7 +137,8 @@ Ask a question via push notification and **wait for the answer** (blocks by defa
   "question": "Allow: rm -rf /tmp/build-artifacts/*",
   "type": "confirm",
   "context": "Cleaning up 2.3GB of stale build artifacts from last week",
-  "agentName": "Hermes - server-maintenance"
+  "agent_name": "Hermes - server-maintenance",
+  "timeout_ms": 12000
 }
 ```
 
@@ -135,7 +149,7 @@ Poll once for a response when `pushary_ask` was called with `wait: false`. Not n
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | correlation_id | string | Yes | The correlationId from pushary_ask |
-| timeoutMs | integer | No | How long to wait (default 30000, max 55000) |
+| timeout_ms | integer | No | How long to wait (default 30000, max 55000) |
 
 ### pushary_cancel
 
@@ -147,7 +161,7 @@ Cancel a pending question that's no longer relevant.
 
 ### pushary_propose_scope
 
-Agree the boundary of a multi-step run in one tap, before doing the work, instead of asking file by file. Call it ONCE at the start of a run that will change several files.
+Agree the boundary of a multi-step run in one tap, before doing the work, instead of asking file by file. Use it once when a file boundary needs agreement or the user requests an enforced scope. Skip a redundant proposal for already authorized work.
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
@@ -160,7 +174,13 @@ Returns `ratified: true` only on an explicit yes. Anything else means proceed as
 
 ## Human-in-the-Loop Flow
 
-One call - `pushary_ask` blocks and returns the answer:
+`pushary_ask` performs its initial wait and at most one server-directed poll. Do not add another poll after that final handoff. With `wait: false`, call `pushary_wait` once yourself.
+
+Read `answered`, `status` and `handoffAction` (falling back to `nextAction`) on every response. Only `pending` is live; expired, cancelled, missing and unavailable are not new timeouts. Follow the returned handoff rather than inventing a retry loop. Before moving a live question to the current chat, cancel it. If cancellation says `stop`, stop; if it loses a race, poll once for one second and honor the winning answer. Silence is never consent. A select or input value containing “yes” is answer data, not approval of a separate action.
+
+Delivery is controlled by the user's policy: `push_first` uses presence, `push_only` requests push every time, `notify_only` leaves the decision in the current client, and `terminal_only` avoids push. Do not override the mode or duplicate a question on every surface. The runtime owns delivery, expiry and settlement; do not claim that a reply can restart an ended agent turn.
+
+One call returns an answer or the handoff:
 
 ```
 result = pushary_ask({
@@ -198,6 +218,6 @@ Always pass `agent_name` so the user knows which Hermes profile or task is askin
 ## Notification Etiquette
 
 - **Titles under 60 characters.** Phone lock screens truncate aggressively.
-- **Bodies under 200 characters.** Put detail in the context object.
+- **Bodies under 200 characters.** Use the flat `summary`, `details` and `next_steps` fields.
 - **Max 3 push notifications per task.** If the user is in an active chat, prefer that channel.
-- **Don't duplicate.** If you already sent the message via Telegram/Discord, only send a push if the user hasn't read it within a reasonable time.
+- **Don't duplicate.** If you already sent the message via Telegram/Discord, send another push only if requested or needed for an unattended result.

@@ -215,7 +215,7 @@ def pushary_ask_end_user(params, **kwargs):
             value = polled.get("value")
 
         answered = status == "answered"
-        approved = answered and (question_type != "confirm" or api.is_affirmative(value))
+        approved = answered and question_type == "confirm" and api.is_affirmative(value)
         return json.dumps({
             "decisionId": decision_id,
             "externalId": external_id,

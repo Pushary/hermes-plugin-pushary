@@ -11,15 +11,18 @@ MAX_ERROR_NOTIFICATIONS = 3
 SYSTEM_PROMPT_SECTION_ID = "pushary.reach-the-human"
 
 SYSTEM_PROMPT_SECTION = (
-    "Pushary reaches the operator on their phone when nobody is watching the "
-    "terminal. Call pushary_ask before anything irreversible, before spending "
-    "money, and whenever you are blocked on a decision that is not yours to "
-    "make; it blocks until they answer. Call propose_scope once at the start of "
-    "a multi-step run so the boundary is agreed in one tap instead of file by "
-    "file. Call pushary_notify with a context type of task_complete or error "
-    "when a long task ends. Prefer one select question carrying the real options "
-    "over several confirms in a row: every question costs the operator their "
-    "attention wherever they are."
+    "Pushary reaches the operator when they are away. Honor authorization already "
+    "granted in this session. Call pushary_ask only for an unresolved decision or "
+    "an action outside that authority; never bypass an enforced host gate. Use "
+    "pushary_propose_scope only for an unresolved or requested file boundary. "
+    "Follow answered, status and handoffAction (or nextAction); silence is not "
+    "consent, and choice/text answers do not authorize a separate action. "
+    "Call pushary_notify with context_type task_complete or error for meaningful "
+    "unattended results, not every step. Batch related questions. Delivery follows "
+    "the user's policy and presence; do not duplicate a live question in chat. "
+    "Confirm notifications can offer lock-screen actions; choices and text open "
+    "the app. Personal tools reach the operator; Partner tools use external_id "
+    "to reach an enrolled customer."
 )
 
 TOOL_REGISTRATIONS = (

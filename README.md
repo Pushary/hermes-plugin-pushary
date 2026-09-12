@@ -9,15 +9,14 @@ npx @pushary/agent-hooks@latest setup --agents hermes
 ```
 
 That installs the plugin into the interpreter Hermes runs in, enables it, and
-selects Pushary as the approval transport. To do it by hand:
+selects Pushary as the approval transport after pairing with the phone app. Existing credentials are reused. Run `npx @pushary/agent-hooks@latest doctor` afterward. To do it by hand:
 
 ```bash
 ~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary
-hermes plugins enable pushary
 ```
 
 Hermes runs in its own virtualenv, so `pip install` must target that interpreter
-rather than your system Python.
+rather than your system Python. Add `pushary` to `plugins.enabled` in your Hermes config for a manual pip install.
 
 ## Setup
 
@@ -32,11 +31,11 @@ Setup reuses the key in `~/.pushary/config.json`. For a manual install, set
 | `pushary_ask` | Ask a question via push (yes/no, multiple choice, or free text) |
 | `pushary_wait` | Poll once for the answer to a question created with `wait=false` |
 | `pushary_cancel` | Cancel a pending question |
-| `pushary_propose_scope` | Agree what a multi-step run may touch, in one tap, before starting |
+| `pushary_propose_scope` | Agree an unresolved or requested file boundary once |
 | `pushary_enroll` | Connect one of your own end-users' phones (Partner plan) |
 | `pushary_ask_end_user` | Ask one of your own end-users, fail-closed (Partner plan) |
 
-## Approving from your lock screen
+## Approving from your phone
 
 Hermes already detects dangerous commands and asks a human before running them.
 This plugin registers `pushary` as an **approval transport**, so that question
@@ -50,7 +49,7 @@ security:
     transport_fallback: builtin
 ```
 
-You get the same four choices Hermes offers in the terminal, and Hermes
+Open the app to see the same four choices Hermes offers in the terminal. Hermes
 remembers the last two exactly as it would have:
 
 | Choice | Effect |
@@ -152,3 +151,7 @@ python -m twine check dist/*
 ```
 
 Host contract tests skip when Hermes is not installed. Run them in the Hermes environment after upgrading the host.
+
+## Customer answers and routing
+
+Personal tools reach the operator on their configured phone, Mac or browser. Partner tools target a customer by `external_id`; they do not create a customer inbox in the Mac app. For `pushary_ask_end_user`, read `answered` and `value` for choice/text results. `approved` is true only for an answered affirmative confirm; a choice or text containing “yes” does not authorize an action. Polling waits and notification routes follow server policy; never interpret silence as consent.

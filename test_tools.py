@@ -21,6 +21,51 @@ class PackageMetadataTests(unittest.TestCase):
         )
 
 
+class PublishedSkillTests(unittest.TestCase):
+    def test_documented_json_examples_match_native_schema_and_preserve_fields(self):
+        skill = Path(__file__).parent / "pushary_plugin/skills/pushary/SKILL.md"
+        examples = [json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", skill.read_text(), re.S)]
+        self.assertEqual(len(examples), 2)
+        notify, ask = examples
+        for example, schema in ((notify, schemas.PUSHARY_NOTIFY), (ask, schemas.PUSHARY_ASK)):
+            params = schema["parameters"]
+            self.assertFalse(set(example) - set(params["properties"]))
+            self.assertTrue(set(params["required"]) <= set(example))
+            for name, value in example.items():
+                field = params["properties"][name]
+                expected = {"string": str, "array": list, "integer": int}[field["type"]]
+                self.assertIsInstance(value, expected)
+                if "enum" in field:
+                    self.assertIn(value, field["enum"])
+        with patch.object(api, "send_notification", return_value={}) as send:
+            tools.pushary_notify(notify)
+        sent = send.call_args.kwargs
+        self.assertEqual(sent["agent_name"], "Hermes - daily-briefing")
+        self.assertEqual(sent["context"], {
+            "type": "task_complete",
+            "summary": notify["summary"],
+            "details": notify["details"],
+            "nextSteps": notify["next_steps"],
+        })
+        with patch.object(api, "ask_user", return_value={"answered": True, "value": "yes"}) as send:
+            tools.pushary_ask(ask)
+        self.assertEqual(send.call_args.kwargs["agent_name"], "Hermes - server-maintenance")
+        self.assertEqual(send.call_args.kwargs["timeout_ms"], 12000)
+
+    def test_customer_answers_authorize_only_an_affirmative_confirm(self):
+        for kind, value, approved in (("confirm", "yes", True), ("confirm", "no", False), ("select", "yes", False), ("input", "yes", False)):
+            with self.subTest(kind=kind, value=value), patch.object(api, "create_end_user_decision", return_value={
+                "decisionId": "d1", "status": "answered", "value": value,
+            }), patch.object(api, "get_end_user_decision") as poll:
+                result = json.loads(tools.pushary_ask_end_user({
+                    "question": "Test answer", "external_id": "customer-1", "type": kind,
+                }))
+            self.assertEqual(result["value"], value)
+            self.assertTrue(result["answered"])
+            self.assertEqual(result["approved"], approved)
+            poll.assert_not_called()
+
+
 class PusharyAskTests(unittest.TestCase):
     def test_wait_false_is_forwarded_and_returns_without_polling(self):
         pending = {"correlationId": "q1", "answered": False, "status": "pending"}
@@ -84,7 +129,9 @@ class PusharyAskTests(unittest.TestCase):
 
 class PusharyApiTests(unittest.TestCase):
     def test_ask_user_sends_wait_and_timeout_to_mcp(self):
-        with patch.object(api, "_mcp_call", return_value={}) as call:
+        with patch.object(api, "_mcp_call", return_value={}) as call, patch.object(
+            api, "_with_identity", side_effect=lambda params: params
+        ):
             api.ask_user("Deploy?", wait=False, timeout_ms=12000)
 
         call.assert_called_once_with("ask_user", {

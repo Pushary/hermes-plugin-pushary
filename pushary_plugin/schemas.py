@@ -195,7 +195,7 @@ PUSHARY_PROPOSE_SCOPE = {
     "name": "pushary_propose_scope",
     "description": (
         "Propose what this run will touch and block until the user ratifies it on "
-        "their phone. Call ONCE at the start of a multi-step run, before doing work. "
+        "their phone when a file boundary is unresolved or explicitly requested. Do not add a redundant approval to already authorized work. "
         "The user approves the paths you intend to change, the areas you promise to "
         "leave alone, and your definition of done in one tap. After that, editing a "
         "file outside the agreed scope becomes a separate 'wants to widen scope' "
@@ -248,7 +248,7 @@ PUSHARY_ENROLL = {
     "description": (
         "Connect one of your OWN end-users' phones so they can approve actions "
         "(Partner plan). Returns a single-use link to show that person; one tap "
-        "turns on approvals, with no account or app for them. Call once per "
+        "connects them through the Pushary app or supported browser fallback, without an operator account. Call once per "
         "end-user and reuse the enrollment, not the link, which expires. Use before "
         "pushary_ask_end_user for a user who has not connected a phone yet."
     ),
