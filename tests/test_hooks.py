@@ -326,7 +326,8 @@ class ApprovalTransportTest(unittest.TestCase):
 
     def test_no_connected_device_raises_so_the_host_can_fall_back(self):
         request = FakeRequest()
-        with mock.patch.object(api, "ask_user", return_value={"correlationId": "c1", "noDevices": True}):
+        with mock.patch.object(api, "ask_user", return_value={"correlationId": "c1", "noDevices": True}), \
+                mock.patch.object(api, "cancel_question", return_value={"cancelled": True}):
             with self.assertRaises(approval.TransportUnavailable):
                 approval.present(request)
 
@@ -366,6 +367,43 @@ class ApprovalTransportTest(unittest.TestCase):
         self.assertEqual(captured["action_body"], request.command)
         self.assertIn("destructive:rm", captured["blocker"])
         self.assertIn("git push", captured["question"])
+
+    def test_push_first_policy_window_hands_back_before_host_deadline(self):
+        with mock.patch.object(api, "ask_user", return_value={"correlationId": "c1", "deliveryMode": "push_first", "policyTimeoutMs": 0}), \
+                mock.patch.object(api, "cancel_question", return_value={"cancelled": True}) as cancel, \
+                mock.patch.object(api, "wait_for_answer") as poll:
+            with self.assertRaises(approval.TransportUnavailable):
+                approval.present(FakeRequest(timeout_seconds=300))
+        cancel.assert_called_once_with("c1")
+        poll.assert_not_called()
+
+    def test_terminal_handoff_withdraws_before_builtin_fallback(self):
+        with mock.patch.object(api, "ask_user", return_value={"correlationId": "c1", "status": "terminal"}), \
+                mock.patch.object(api, "cancel_question", return_value={"cancelled": True}) as cancel, \
+                mock.patch.object(api, "wait_for_answer") as poll:
+            with self.assertRaises(approval.TransportUnavailable):
+                approval.present(FakeRequest())
+        cancel.assert_called_once_with("c1")
+        poll.assert_not_called()
+
+    def test_cancelled_or_unavailable_never_reopens_builtin_prompt(self):
+        for status in ("cancelled", "unavailable"):
+            with mock.patch.object(api, "ask_user", return_value={"correlationId": "c1"}), \
+                    mock.patch.object(api, "wait_for_answer", return_value={"answered": False, "status": status, "handoffAction": "stop"}) as poll, \
+                    mock.patch.object(api, "cancel_question", return_value={"cancelled": True}):
+                self.assertEqual(approval.present(FakeRequest()), "deny")
+                self.assertEqual(poll.call_count, 1)
+
+    def test_late_answer_wins_withdrawal_race(self):
+        with mock.patch.object(api, "ask_user", return_value={"correlationId": "c1", "status": "terminal"}), \
+                mock.patch.object(api, "cancel_question", return_value={"cancelled": False}), \
+                mock.patch.object(api, "wait_for_answer", return_value={"answered": True, "value": "Allow once"}):
+            self.assertEqual(approval.present(FakeRequest()), "once")
+
+    def test_failed_withdrawal_does_not_open_second_prompt(self):
+        with mock.patch.object(api, "ask_user", return_value={"correlationId": "c1", "status": "terminal"}), \
+                mock.patch.object(api, "cancel_question", return_value={"error": "offline"}):
+            self.assertEqual(approval.present(FakeRequest()), "deny")
 
 
 class SessionLifecycleTest(unittest.TestCase):
@@ -430,6 +468,11 @@ class SessionCommandTest(unittest.TestCase):
         pending = mock.patch.object(api, "PENDING_DIR", Path(directory.name))
         pending.start()
         self.addCleanup(pending.stop)
+
+    def test_turn_end_reports_idle_before_session_teardown(self):
+        with mock.patch.object(api, "agent_event", return_value={}) as report:
+            plugin._on_session_end(session_id="s1", completed=True)
+        report.assert_called_once_with("session_end", "s1", can_drain=False)
 
     def test_session_start_advertises_the_command_consumer(self):
         with mock.patch.object(api, "agent_event", return_value={}) as report:
@@ -600,6 +643,21 @@ class DecisionFieldTest(unittest.TestCase):
             result = json.loads(tools.pushary_propose_scope({"done_when": "tests pass"}))
         self.assertTrue(result["ratified"])
         self.assertEqual(captured["done"], ("tests pass", "sess-9"))
+
+
+
+class TransportTimeoutTests(unittest.TestCase):
+    def test_blocking_questions_keep_their_poll_window_but_withdrawal_is_bounded(self):
+        with mock.patch.object(api, "_get_api_key", return_value="pk_test.sk_test"), mock.patch.object(api.urllib.request, "urlopen", side_effect=OSError("offline")) as send:
+            for name, params, expected in [
+                ("wait_for_answer", {"timeoutMs": 50000}, 52),
+                ("ask_user", {"wait": True, "timeoutMs": 30000}, 32),
+                ("propose_scope", {"timeoutMs": 30000}, 32),
+                ("ask_user", {"wait": False}, 10),
+                ("cancel_question", {}, 4),
+            ]:
+                api._mcp_call(name, params)
+                self.assertEqual(send.call_args.kwargs["timeout"], expected)
 
 
 if __name__ == "__main__":

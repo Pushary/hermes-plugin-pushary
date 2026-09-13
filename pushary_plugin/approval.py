@@ -88,34 +88,68 @@ def _open_question(request, offered, uses_select):
     )
 
 
+def _stopped(result):
+    return result.get("handoffAction") == "stop" or result.get("status") in ("cancelled", "unavailable", "stopped")
+
+
+def _withdraw(correlation_id):
+    try:
+        cancelled = api.cancel_question(correlation_id)
+        if _stopped(cancelled) or cancelled.get("error"):
+            return {"handoffAction": "stop"}
+        if cancelled.get("cancelled") is True:
+            return {}
+        answer = api.wait_for_answer(correlation_id, 1000)
+        if answer.get("answered") or answer.get("status") in ("expired", "missing"):
+            return answer
+    except Exception:
+        pass
+    return {"handoffAction": "stop"}
+
+
 def present(request):
     offered = _offered(request.allowed_choices)
     if not offered:
-        raise TransportUnavailable("no approval choices offered")
-    uses_select = len(offered) > 2
-
+        return request.respond("deny")
+    uses_select = [choice for choice, _ in offered] != ["once", "deny"]
+    # Reserve time for withdrawal before the host discards a late decision.
+    started_at = time.monotonic()
+    deadline = started_at + max(float(request.timeout_seconds or 0) - 10, 0.0)
     created = _open_question(request, offered, uses_select)
-    if "error" in created:
-        raise TransportUnavailable(str(created["error"]))
-    if created.get("noDevices"):
-        raise TransportUnavailable("no Pushary device is connected")
-
-    correlation_id = created.get("correlationId")
-    if not correlation_id:
-        raise TransportUnavailable("Pushary did not return a correlationId")
-
     if created.get("answered"):
         return request.respond(_choice_from_answer(created.get("value"), offered, uses_select))
+    if _stopped(created):
+        return request.respond("deny")
+    correlation_id = created.get("correlationId")
+    if not correlation_id:
+        raise TransportUnavailable("Pushary did not create an approval")
 
-    deadline = time.monotonic() + max(float(request.timeout_seconds or 0), 0.0)
-    while time.monotonic() < deadline:
-        remaining = deadline - time.monotonic()
-        wait_ms = int(min(POLL_CEILING_SECONDS, max(1.0, remaining)) * 1000)
-        answer = api.wait_for_answer(correlation_id, wait_ms)
-        if answer.get("answered"):
-            return request.respond(_choice_from_answer(answer.get("value"), offered, uses_select))
-        if answer.get("error"):
-            break
+    policy_deadline = None
+    window_ms = created.get("policyTimeoutMs")
+    if created.get("deliveryMode") == "push_first" and isinstance(window_ms, (int, float)) and window_ms >= 0:
+        policy_deadline = started_at + window_ms / 1000
+        deadline = min(deadline, policy_deadline)
+    handoff = created.get("noDevices") or created.get("suppressed") or created.get("status") in ("terminal", "notified")
+    answer = created
+    try:
+        while not handoff and time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            answer = api.wait_for_answer(correlation_id, int(min(POLL_CEILING_SECONDS, max(1.0, remaining)) * 1000))
+            if answer.get("answered"):
+                return request.respond(_choice_from_answer(answer.get("value"), offered, uses_select))
+            if _stopped(answer) or answer.get("error") or answer.get("status") in ("expired", "missing"):
+                break
+            # Some hosts/proxies return pending immediately instead of long-polling.
+            time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+    except Exception:
+        answer = {"handoffAction": "stop"}
 
-    api.cancel_question(correlation_id)
+    late = _withdraw(correlation_id)
+    if _stopped(answer) or _stopped(late):
+        return request.respond("deny")
+    if late.get("answered"):
+        return request.respond(_choice_from_answer(late.get("value"), offered, uses_select))
+    if handoff or (policy_deadline is not None and time.monotonic() >= policy_deadline):
+        # Only a fenced question may reach Hermes's configured builtin fallback.
+        raise TransportUnavailable("Approval handed back to Hermes")
     return request.respond("deny")

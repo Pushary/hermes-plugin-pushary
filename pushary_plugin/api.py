@@ -226,8 +226,10 @@ def _mcp_call(tool_name, params):
         method="POST",
     )
 
+    blocking = tool_name in ("wait_for_answer", "propose_scope") or (tool_name == "ask_user" and params.get("wait", True))
+    timeout = min(max(params.get("timeoutMs", 30000), 1000), 55000) / 1000 + 2 if blocking else 4 if tool_name == "cancel_question" else 10
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8")
             content_type = resp.headers.get_content_type()
     except urllib.error.HTTPError as e:

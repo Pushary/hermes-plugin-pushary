@@ -60,8 +60,9 @@ remembers the last two exactly as it would have:
 | Deny | Blocks it, and the agent is told the user did not consent |
 
 `transport_fallback: builtin` is what makes this safe to leave on: if your API
-key is missing, Pushary is unreachable, or no device is connected, Hermes falls
-back to the terminal prompt rather than blocking work. Drop the fallback line and
+key is missing, or Terminal mode/no reachable device requests a local handoff, Hermes can fall
+back after Pushary safely withdraws its question. Cancellation or unverifiable withdrawal
+stops the action; a network failure while waiting does not silently reopen approval. Drop the fallback line and
 an unreachable Pushary becomes a denial instead.
 
 The approval window is Hermes' own `approvals.timeout` (300 seconds by default),

@@ -308,6 +308,7 @@ def _report_session_event(event, session_id, can_drain=False):
 def _on_session_end(session_id=None, completed=False, interrupted=False, **kwargs):
     identity.remember_session(session_id)
     _last_turn.update(completed=bool(completed), interrupted=bool(interrupted))
+    _report_session_event("session_end", session_id or identity.session_id())
 
 
 def _on_session_finalize(session_id=None, **kwargs):
