@@ -129,6 +129,7 @@ def pushary_propose_scope(params, **kwargs):
             session,
             allowed_paths=params.get("allowed_paths"),
             off_limits_paths=params.get("off_limits_paths"),
+            promises=params.get("promises"),
             agent_name=params.get("agent_name") or identity.agent_name(),
             timeout_ms=params.get("timeout_ms"),
         )

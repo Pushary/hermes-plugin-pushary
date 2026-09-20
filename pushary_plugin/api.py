@@ -332,12 +332,16 @@ def ask_user(question, question_type="confirm", options=None, placeholder=None,
 
 
 def propose_scope(done_when, session_id, allowed_paths=None, off_limits_paths=None,
-                  agent_name=None, timeout_ms=None):
+                  agent_name=None, timeout_ms=None, promises=None):
+    # `promises` is appended LAST so the positional signature every released
+    # plugin calls keeps its meaning.
     params = {"doneWhen": done_when, "sessionId": session_id}
     if allowed_paths:
         params["allowedPaths"] = allowed_paths
     if off_limits_paths:
         params["offLimitsPaths"] = off_limits_paths
+    if promises:
+        params["promises"] = promises
     if agent_name:
         params["agentName"] = agent_name
     if timeout_ms is not None:

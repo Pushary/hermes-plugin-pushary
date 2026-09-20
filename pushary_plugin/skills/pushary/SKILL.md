@@ -161,14 +161,19 @@ Cancel a pending question that's no longer relevant.
 
 ### pushary_propose_scope
 
-Agree the boundary of a multi-step run in one tap, before doing the work, instead of asking file by file. Use it once when a file boundary needs agreement or the user requests an enforced scope. Skip a redundant proposal for already authorized work.
+Agree the boundary of a multi-step run in one tap, before doing the work, instead of asking file by file. Use it once when a boundary needs agreement or the user requests an enforced scope. Skip a redundant proposal for already authorized work.
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | done_when | string | Yes | What "finished" means for this run |
 | allowed_paths | string[] | No | Globs you intend to change, e.g. `["src/**"]` |
 | off_limits_paths | string[] | No | Globs you promise not to touch; these win on overlap |
+| promises | string[] | No | Boundaries that are not file paths: recipients, channels, spend, systems you will not open |
 | agent_name | string | No | Identifies this Hermes instance |
+
+Only file paths are enforced, and only on tool calls that carry one. Shell commands, reads, web requests and MCP tools carry no path, so the contract says nothing about them. A run that changes no files belongs in `promises`, which is shown to the user and recorded but never checked. A word that is not a path in `allowed_paths` matches no file and makes every change ask instead.
+
+Read `enforces` in the result. An empty list means nothing here is checked automatically, and you must say so rather than report that a scope is in force.
 
 Returns `ratified: true` only on an explicit yes. Anything else means proceed as if no scope was agreed; do not describe it as ratified.
 

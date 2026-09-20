@@ -31,7 +31,7 @@ Setup reuses the key in `~/.pushary/config.json`. For a manual install, set
 | `pushary_ask` | Ask a question via push (yes/no, multiple choice, or free text) |
 | `pushary_wait` | Poll once for the answer to a question created with `wait=false` |
 | `pushary_cancel` | Cancel a pending question |
-| `pushary_propose_scope` | Agree an unresolved or requested file boundary once |
+| `pushary_propose_scope` | Agree the boundary of a run once: file globs, or a recorded promise when it changes no files |
 | `pushary_enroll` | Connect one of your own end-users' phones (Partner plan) |
 | `pushary_ask_end_user` | Ask one of your own end-users, fail-closed (Partner plan) |
 

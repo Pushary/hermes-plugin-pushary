@@ -195,13 +195,19 @@ PUSHARY_PROPOSE_SCOPE = {
     "name": "pushary_propose_scope",
     "description": (
         "Propose what this run will touch and block until the user ratifies it on "
-        "their phone when a file boundary is unresolved or explicitly requested. Do not add a redundant approval to already authorized work. "
+        "their phone. Do not add a redundant approval to already authorized work. "
         "The user approves the paths you intend to change, the areas you promise to "
         "leave alone, and your definition of done in one tap. After that, editing a "
         "file outside the agreed scope becomes a separate 'wants to widen scope' "
         "question instead of a silent approval, so the user is asked once about the "
-        "boundary rather than repeatedly about each file. Use glob syntax. Shell "
-        "commands are NOT scoped here. Returns ratified:true only on an explicit yes; "
+        "boundary rather than repeatedly about each file. ONLY file paths are "
+        "enforced, and only on tool calls that carry one; shell commands, reads, web "
+        "requests and MCP tools carry no path, so the contract says nothing about "
+        "them. A boundary that is not a path (recipients, channels, spend, systems) "
+        "goes in promises, which is shown and recorded but never checked. Read the "
+        "returned enforces: an empty list means nothing here is checked "
+        "automatically, and you must say so rather than report that a scope is in "
+        "force. Returns ratified:true only on an explicit yes; "
         "anything else means proceed as if no scope was agreed."
     ),
     "parameters": {
@@ -220,6 +226,16 @@ PUSHARY_PROPOSE_SCOPE = {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "Globs you promise not to touch. These win wherever they overlap allowed_paths.",
+            },
+            "promises": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Boundaries that are not file paths: recipients, channels, spend limits, "
+                    "systems you will not open. Up to 10 of 200 characters. Shown to the user "
+                    "as \"Promised, not checked\" and recorded, but NEVER enforced, because the "
+                    "gate judges a file path and these have none. Do not put these in allowed_paths."
+                ),
             },
             "agent_name": {
                 "type": "string",
