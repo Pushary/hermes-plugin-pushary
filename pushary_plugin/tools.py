@@ -19,7 +19,7 @@ def _accepted_fields(params, accepted):
 def pushary_notify(params, **kwargs):
     title = params.get("title", "")
     body = params.get("body", "")
-    agent_name = params.get("agent_name")
+    agent_name = identity.labelled_agent_name(params.get("agent_name"))
 
     context = None
     context_type = params.get("context_type")
@@ -49,7 +49,7 @@ def pushary_ask(params, **kwargs):
     options = params.get("options")
     placeholder = params.get("placeholder")
     context = params.get("context")
-    agent_name = params.get("agent_name")
+    agent_name = identity.labelled_agent_name(params.get("agent_name"))
     wait = params.get("wait", True)
     timeout_ms = params.get("timeout_ms", 30000)
 
@@ -130,7 +130,7 @@ def pushary_propose_scope(params, **kwargs):
             allowed_paths=params.get("allowed_paths"),
             off_limits_paths=params.get("off_limits_paths"),
             promises=params.get("promises"),
-            agent_name=params.get("agent_name") or identity.agent_name(),
+            agent_name=identity.labelled_agent_name(params.get("agent_name")),
             timeout_ms=params.get("timeout_ms"),
         )
         return json.dumps(result)

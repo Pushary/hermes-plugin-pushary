@@ -66,6 +66,31 @@ class PublishedSkillTests(unittest.TestCase):
             poll.assert_not_called()
 
 
+class AgentNameTests(unittest.TestCase):
+    def test_every_personal_call_says_it_came_from_hermes_whatever_name_the_model_picks(self):
+        for requested, sent in (
+            ("Codex - pushary-2", "Hermes - pushary-2"),
+            ("Hermes - daily-briefing", "Hermes - daily-briefing"),
+            ("pushary-2", "Hermes"),
+            (None, "Hermes"),
+        ):
+            with self.subTest(requested=requested), patch.object(api, "send_notification", return_value={}) as notify, \
+                    patch.object(api, "ask_user", return_value={"answered": True, "value": "yes"}) as ask, \
+                    patch.object(api, "propose_scope", return_value={}) as scope:
+                tools.pushary_notify({"title": "Done", "body": "Built", "agent_name": requested})
+                tools.pushary_ask({"question": "Ship?", "agent_name": requested})
+                tools.pushary_propose_scope({"done_when": "Tests pass", "session_id": "s1", "agent_name": requested})
+            self.assertEqual(notify.call_args.kwargs["agent_name"], sent)
+            self.assertEqual(ask.call_args.kwargs["agent_name"], sent)
+            self.assertEqual(scope.call_args.kwargs["agent_name"], sent)
+
+    def test_a_configured_name_replaces_hermes(self):
+        with patch.dict(os.environ, {"PUSHARY_AGENT_NAME": "Hermes Night"}), \
+                patch.object(api, "send_notification", return_value={}) as notify:
+            tools.pushary_notify({"title": "Done", "body": "Built", "agent_name": "Codex - app"})
+        self.assertEqual(notify.call_args.kwargs["agent_name"], "Hermes Night - app")
+
+
 class PusharyAskTests(unittest.TestCase):
     def test_wait_false_is_forwarded_and_returns_without_polling(self):
         pending = {"correlationId": "q1", "answered": False, "status": "pending"}
@@ -84,7 +109,7 @@ class PusharyAskTests(unittest.TestCase):
             options=None,
             placeholder=None,
             context=None,
-            agent_name=None,
+            agent_name="Hermes",
             wait=False,
             timeout_ms=12000,
         )
@@ -164,8 +189,12 @@ class PusharySchemaTests(unittest.TestCase):
 
 class PusharyGateTests(unittest.TestCase):
     def test_configured_gate_blocks_when_no_api_key_is_available(self):
-        with patch.dict(os.environ, {"PUSHARY_GATE_TOOLS": "shell"}, clear=True):
+        missing_config = str(Path(__file__).parent / "missing-pushary-config.json")
+        with patch.dict(os.environ, {"PUSHARY_GATE_TOOLS": "shell", "PUSHARY_CONFIG_FILE": missing_config}, clear=True), \
+                patch.object(api, "ask_user") as ask:
             result = pushary_plugin._on_pre_tool_call(tool_name="shell", args={"cmd": "deploy"})
+
+        ask.assert_not_called()
 
         self.assertEqual(result["action"], "block")
 

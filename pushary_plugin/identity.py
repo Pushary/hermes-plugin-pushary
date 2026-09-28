@@ -12,6 +12,11 @@ def agent_name():
     return os.environ.get("PUSHARY_AGENT_NAME", DEFAULT_AGENT_NAME)
 
 
+def labelled_agent_name(requested):
+    project = str(requested or "").partition(" - ")[2].strip()
+    return f"{agent_name()} - {project}" if project else agent_name()
+
+
 def machine_id():
     try:
         host = socket.gethostname()
