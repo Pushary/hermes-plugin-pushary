@@ -1,6 +1,6 @@
 ---
 name: pushary-hermes
-version: 0.8.1
+version: 0.8.2
 description: Push notifications and human-in-the-loop for Hermes Agent. Use this whenever a running agent needs a human and no chat session is active, such as before an irreversible or destructive action, before spending money, deploying, force-pushing or deleting, when blocked on a decision outside your authority, when running unattended and you hit a genuine ambiguity, when another skill's workflow says to confirm with the user, and when a long task finishes or fails with nobody watching. Send alerts when tasks finish, ask questions (yes/no, multiple choice, or free text) via web push, and get answers from their connected devices. Use these tools proactively when the user is not actively in a chat session. Works alongside Hermes's built-in messaging platforms (Telegram, Discord, etc.) as a universal fallback channel.
 metadata:
   hermes:
@@ -44,10 +44,10 @@ Use an extra push only when the user requested it or a meaningful unattended res
 ## Setup
 
 ```bash
-npx @pushary/agent-hooks@latest setup --agents hermes
+npx pushary@latest setup --agents hermes
 ```
 
-That installs `hermes-plugin-pushary` into the interpreter Hermes runs in, enables it, and registers the tools natively. No MCP server config is needed. Setup pairs with the Pushary app; show the QR/link and verify the matching fingerprint. Existing credentials are reused. Run `npx @pushary/agent-hooks@latest doctor` afterward. Manual API-key configuration is a fallback, not another step after pairing.
+That installs `hermes-plugin-pushary` into the interpreter Hermes runs in, enables it, and registers the tools natively. No MCP server config is needed. Setup pairs with the Pushary app; show the QR/link and verify the matching fingerprint. Existing credentials are reused. Run `npx pushary@latest doctor` afterward. Manual API-key configuration is a fallback, not another step after pairing.
 
 ## Approvals Go to the Phone
 
@@ -71,7 +71,7 @@ The fallback is what makes it safe to leave on: when no device is connected or P
 | Slack | Answer through buttons, menus or text modals when the integration and intended recipient are configured. |
 | Browser | Open the decision page as a fallback; browser notification delivery requires permission. |
 
-Personal setup connects the operator's devices. For a Mac, install from https://pushary.com/download, sign in to the same personal account and connect your agents in the app. Run `npx @pushary/agent-hooks@latest doctor`, then request one harmless test question and verify it reaches the intended surface. Test phone fallback while away from the Mac; do not infer delivery from a successful API call alone.
+Personal setup connects the operator's devices. For a Mac, install from https://pushary.com/download, sign in to the same personal account and connect your agents in the app. Run `npx pushary@latest doctor`, then request one harmless test question and verify it reaches the intended surface. Test phone fallback while away from the Mac; do not infer delivery from a successful API call alone.
 
 Partner customers use scoped enrollment links issued by their application. Do not enroll them into the operator's account or send their decisions through personal tools. The Mac notch currently uses the personal account/session API; do not promise a Partner customer inbox on Mac. See https://pushary.com/docs/agents/embed for Partner setup.
 

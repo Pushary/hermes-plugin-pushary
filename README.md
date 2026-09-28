@@ -5,11 +5,11 @@ Push notifications and human-in-the-loop for [Hermes Agent](https://hermes-agent
 ## Install
 
 ```bash
-npx @pushary/agent-hooks@latest setup --agents hermes
+npx pushary@latest setup --agents hermes
 ```
 
 That installs the plugin into the interpreter Hermes runs in, enables it, and
-selects Pushary as the approval transport after pairing with the phone app. Existing credentials are reused. Run `npx @pushary/agent-hooks@latest doctor` afterward. To do it by hand:
+selects Pushary as the approval transport after pairing with the phone app. Existing credentials are reused. Run `npx pushary@latest doctor` afterward. To do it by hand:
 
 ```bash
 ~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary
