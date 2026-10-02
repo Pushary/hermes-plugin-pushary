@@ -108,15 +108,25 @@ def _gated_tools():
     return {name.strip().lower() for name in raw.split(",") if name.strip()}
 
 
+def _redact_outbound_text(text: str) -> str:
+    try:
+        from agent.redact import redact_for_egress, redact_sensitive_text
+
+        return redact_for_egress(redact_sensitive_text(text, force=True, redact_url_credentials=True))
+    except Exception:
+        logger.warning("[pushary] host redaction unavailable; omitting outbound detail")
+        return "[redaction unavailable]"
+
+
 def _summarize_args(args):
     if not isinstance(args, dict) or not args:
         return None
     parts = []
     for key, value in args.items():
-        rendered = str(value)
+        rendered = _redact_outbound_text(f"{key}: {value}")
         if len(rendered) > 200:
             rendered = rendered[:200] + "…"
-        parts.append(f"{key}: {rendered}")
+        parts.append(rendered)
     return "\n".join(parts)[:500]
 
 
@@ -126,7 +136,7 @@ def _arg_target(args):
     for key in ("command", "path", "file_path", "url", "query"):
         value = args.get(key)
         if value:
-            return " ".join(str(value).split()[:2])[:80]
+            return " ".join(_redact_outbound_text(str(value)).split()[:2])[:80]
     return None
 
 
@@ -261,6 +271,7 @@ def _on_post_tool_call(tool_name, args, result, duration_ms=0, status=None,
     _session_totals["notified"] += 1
 
     try:
+        failure = _redact_outbound_text(str(failure))
         api.send_notification(
             title="Tool error in Hermes",
             body=f"{tool_name} failed: {failure[:150]}",

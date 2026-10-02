@@ -43,11 +43,7 @@ Use an extra push only when the user requested it or a meaningful unattended res
 
 ## Setup
 
-```bash
-npx pushary@latest setup --agents hermes
-```
-
-That installs `hermes-plugin-pushary` into the interpreter Hermes runs in, enables it, and registers the tools natively. No MCP server config is needed. Setup pairs with the Pushary app; show the QR/link and verify the matching fingerprint. Existing credentials are reused. Run `npx pushary@latest doctor` afterward. Manual API-key configuration is a fallback, not another step after pairing.
+The operator configures `PUSHARY_API_KEY` or pairs their devices through the Pushary app, then sets `security.approval.transport: pushary`. The catalog-installed plugin already registers its tools natively; do not run another installer or install a second plugin copy. No MCP server configuration is needed. Keep credentials out of chat and verify the paired account and device.
 
 ## Approvals Go to the Phone
 
@@ -60,7 +56,7 @@ security:
     transport_fallback: builtin
 ```
 
-The fallback is what makes it safe to leave on: when no device is connected or Pushary is unreachable, Hermes falls back to its terminal prompt rather than denying the command. You do not call this yourself; it fires when Hermes decides a command needs a human.
+Hermes denies by default when Pushary is unreachable. Only an operator who sets `transport_fallback: builtin` enables its built-in prompt after a safe local handoff; cancellation or an unverifiable withdrawal still stops the action. You do not call this yourself; it fires when Hermes decides a command needs a human.
 
 ## Answer surfaces and account boundaries
 
@@ -71,7 +67,7 @@ The fallback is what makes it safe to leave on: when no device is connected or P
 | Slack | Answer through buttons, menus or text modals when the integration and intended recipient are configured. |
 | Browser | Open the decision page as a fallback; browser notification delivery requires permission. |
 
-Personal setup connects the operator's devices. For a Mac, install from https://pushary.com/download, sign in to the same personal account and connect your agents in the app. Run `npx pushary@latest doctor`, then request one harmless test question and verify it reaches the intended surface. Test phone fallback while away from the Mac; do not infer delivery from a successful API call alone.
+Personal setup connects the operator's devices. For a Mac, the operator installs from https://pushary.com/download, signs in to the same personal account and connects their agents in the app. Request one harmless test question and verify it reaches the intended surface. Test phone fallback while away from the Mac; do not infer delivery from a successful API call alone.
 
 Partner customers use scoped enrollment links issued by their application. Do not enroll them into the operator's account or send their decisions through personal tools. The Mac notch currently uses the personal account/session API; do not promise a Partner customer inbox on Mac. See https://pushary.com/docs/agents/embed for Partner setup.
 

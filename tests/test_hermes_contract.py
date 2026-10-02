@@ -1,6 +1,7 @@
 import inspect
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import pushary_plugin as plugin
 from pushary_plugin import approval, host
@@ -208,12 +209,24 @@ class ApprovalTransportContractTest(unittest.TestCase):
         self.assertIn(approval.PLUGIN_RULE_MARKER, source)
 
     def test_the_config_keys_we_read_are_the_ones_the_host_reads(self):
-        from tools.approval import _get_approval_transport_config
+        from tools.approval_context import _get_approval_transport_config
 
-        source = inspect.getsource(_get_approval_transport_config)
-        self.assertIn('"transport"', source)
-        self.assertIn('"approval"', source)
-        self.assertIn('"security"', source)
+        config = {"security": {"approval": {"transport": "pushary", "transport_fallback": "builtin"}}}
+        with mock.patch("hermes_cli.config.load_config_readonly", return_value=config):
+            self.assertEqual(_get_approval_transport_config(), ("pushary", "builtin"))
+
+    def test_outbound_detail_uses_the_hosts_strict_credential_redaction(self):
+        from agent import redact
+
+        vendor_key = "sk-" + "abcdefghij" * 30
+        opaque = "opaque-test-value-0123456789"
+        url = f"https://a.test/?token={opaque}"
+        with mock.patch.object(redact, "_REDACT_ENABLED", False):
+            for text, secret in ((vendor_key, vendor_key[:100]), (url, opaque), (f"Bearer {opaque}", opaque)):
+                with self.subTest(text=text):
+                    self.assertNotIn(secret, plugin._redact_outbound_text(text))
+                    self.assertNotIn(secret, plugin._summarize_args({"url": text}))
+                    self.assertNotIn(secret, plugin._arg_target({"url": text}))
 
 
 def _registered_hooks():

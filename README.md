@@ -4,15 +4,21 @@ Push notifications and human-in-the-loop for [Hermes Agent](https://hermes-agent
 
 ## Install
 
+If installed through Hermes's catalog, the plugin is already present. Configure
+`PUSHARY_API_KEY` or pair through the Pushary app, then select the approval
+transport below. Do not run a second installer over the catalog copy.
+
+For a standalone installation, these are operator-only shell steps:
+
 ```bash
-npx pushary@latest setup --agents hermes
+npx pushary@1.9.3 setup --agents hermes
 ```
 
 That installs the plugin into the interpreter Hermes runs in, enables it, and
-selects Pushary as the approval transport after pairing with the phone app. Existing credentials are reused. Run `npx pushary@latest doctor` afterward. To do it by hand:
+selects Pushary as the approval transport after pairing with the phone app. Existing credentials are reused. Run `npx pushary@1.9.3 doctor` afterward. To do it by hand:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.5.8
 ```
 
 Hermes runs in its own virtualenv, so `pip install` must target that interpreter
@@ -100,11 +106,19 @@ When both are configured the transport wins: the hook escalates to Hermes' own
 approval gate, which gets the full 300-second window and the once/session/always
 choices, instead of holding a 30-second hook open on a network call.
 
+For an escalated per-tool gate, **Always allow** creates a standing rule for the
+whole tool name, covering its future calls with different arguments. Choose
+**Allow once** when only the displayed call is authorized.
+
 ## Auto-notifications
 
 Errors returned by any tool are pushed automatically, capped at three per
 session. Set `PUSHARY_AUTO_NOTIFY_SESSION_END=1` to also get one notification
 when a session finishes, with its tool and error counts.
+
+Gated argument summaries, targets and error text use Hermes's forced secret
+redaction before truncation or transmission to pushary.com. If the host
+redactor is unavailable or fails, the detail is omitted.
 
 Set `PUSHARY_AGENT_NAME` to identify this Hermes instance in notifications (e.g.
 `"Hermes - daily-briefing"`). It defaults to `Hermes`.

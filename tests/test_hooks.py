@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -266,7 +267,8 @@ class PreToolCallTest(unittest.TestCase):
 
     def test_the_escalation_carries_the_args_the_host_gate_cannot_see(self):
         config = {"security": {"approval": {"transport": "pushary"}}}
-        with mock.patch.object(host, "_config", return_value=config):
+        with mock.patch.object(host, "_config", return_value=config), \
+                mock.patch.object(plugin, "_redact_outbound_text", side_effect=str):
             result = plugin._on_pre_tool_call(
                 tool_name="terminal", args={"command": "rm -rf /tmp/build"}
             )
@@ -275,7 +277,8 @@ class PreToolCallTest(unittest.TestCase):
 
     def test_the_gate_sends_the_fields_the_decision_layer_needs(self):
         captured, fake_ask = self._ask({"answered": True, "value": "yes"})
-        with mock.patch.object(tools, "pushary_ask", fake_ask):
+        with mock.patch.object(tools, "pushary_ask", fake_ask), \
+                mock.patch.object(plugin, "_redact_outbound_text", side_effect=str):
             plugin._on_pre_tool_call(
                 tool_name="terminal",
                 args={"command": "git push --force"},
@@ -551,7 +554,8 @@ class PostToolCallTest(unittest.TestCase):
         self.addCleanup(os.environ.pop, "PUSHARY_API_KEY", None)
 
     def test_uses_the_hosts_status_for_a_failure_that_is_not_json(self):
-        with mock.patch.object(api, "send_notification") as notify:
+        with mock.patch.object(api, "send_notification") as notify, \
+                mock.patch.object(plugin, "_redact_outbound_text", side_effect=str):
             plugin._on_post_tool_call(
                 "terminal", {}, "bash: no such file", 12,
                 status="error", error_message="exit 1",
@@ -582,6 +586,54 @@ class PostToolCallTest(unittest.TestCase):
         with mock.patch.object(api, "send_notification", side_effect=AssertionError("must not call")):
             plugin._on_post_tool_call("terminal", {}, "x", 1, status="error", error_message="boom")
         self.assertEqual(plugin._session_totals["tools"], 1)
+
+
+class OutboundRedactionTest(unittest.TestCase):
+    def setUp(self):
+        reset_state()
+
+    def test_gate_and_error_egress_force_host_redaction_before_truncation(self):
+        secret = "sk-" + "s" * 300
+        redactor = types.ModuleType("agent.redact")
+        redactor.redact_sensitive_text = mock.Mock(
+            side_effect=lambda text, *, force, redact_url_credentials: text.replace(secret, "[redacted]")
+        )
+        redactor.redact_for_egress = mock.Mock(side_effect=str)
+        env = {"PUSHARY_API_KEY": "test-key", "PUSHARY_GATE_TOOLS": "terminal"}
+        with mock.patch.dict("sys.modules", {"agent": types.ModuleType("agent"), "agent.redact": redactor}), \
+                mock.patch.dict(os.environ, env), \
+                mock.patch.object(host, "_config", return_value={}), \
+                mock.patch.object(tools, "pushary_ask", return_value=json.dumps({"correlationId": "c1", "answered": True, "value": "yes"})) as ask, \
+                mock.patch.object(api, "send_notification") as notify:
+            args = {"command": secret + " command"}
+            self.assertIsNone(plugin._on_pre_tool_call("terminal", args))
+            outbound = ask.call_args.args[0]
+            for field in ("context", "action_body", "tool_target"):
+                self.assertIn("[redacted]", outbound[field])
+                self.assertNotIn(secret[:100], outbound[field])
+            message = plugin._escalate_to_host_gate("terminal", args)["message"]
+            self.assertIn("[redacted]", message)
+            self.assertNotIn(secret[:100], message)
+            plugin._on_post_tool_call("terminal", {}, None, status="error", error_message=secret)
+            payload = notify.call_args.kwargs
+            self.assertIn("[redacted]", payload["body"])
+            self.assertIn("[redacted]", payload["context"]["errorMessage"])
+            self.assertNotIn(secret[:100], json.dumps(payload))
+        self.assertTrue(redactor.redact_sensitive_text.called)
+        for call in redactor.redact_sensitive_text.call_args_list:
+            self.assertIs(call.kwargs["force"], True)
+            self.assertIs(call.kwargs["redact_url_credentials"], True)
+        self.assertEqual(redactor.redact_for_egress.call_count, redactor.redact_sensitive_text.call_count)
+
+    def test_missing_or_failed_redactor_never_returns_raw_detail(self):
+        redactor = types.ModuleType("agent.redact")
+        redactor.redact_sensitive_text = mock.Mock(side_effect=RuntimeError("unavailable"))
+        redactor.redact_for_egress = mock.Mock(side_effect=str)
+        for module in (None, redactor):
+            with self.subTest(module=module), \
+                    mock.patch.dict("sys.modules", {"agent": types.ModuleType("agent"), "agent.redact": module}):
+                self.assertEqual(plugin._summarize_args({"password": "private"}), "[redaction unavailable]")
+                self.assertEqual(plugin._arg_target({"command": "private"}), "[redaction unavailable]")
 
 
 class DecisionFieldTest(unittest.TestCase):
