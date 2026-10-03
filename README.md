@@ -11,11 +11,11 @@ transport below. Do not run a second installer over the catalog copy.
 For a standalone installation, these are operator-only shell steps:
 
 ```bash
-npx pushary@1.9.3 setup --agents hermes
+npx pushary@latest setup --agents hermes
 ```
 
 That installs the plugin into the interpreter Hermes runs in, enables it, and
-selects Pushary as the approval transport after pairing with the phone app. Existing credentials are reused. Run `npx pushary@1.9.3 doctor` afterward. To do it by hand:
+selects Pushary as the approval transport after pairing with the phone app. Existing credentials are reused. Run `npx pushary@latest doctor` afterward. To do it by hand:
 
 ```bash
 ~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.5.9
