@@ -635,6 +635,19 @@ class OutboundRedactionTest(unittest.TestCase):
                 self.assertEqual(plugin._summarize_args({"password": "private"}), "[redaction unavailable]")
                 self.assertEqual(plugin._arg_target({"command": "private"}), "[redaction unavailable]")
 
+    def test_host_without_egress_redaction_still_shows_redacted_detail(self):
+        redactor = types.ModuleType("agent.redact")
+        redactor.redact_sensitive_text = mock.Mock(
+            side_effect=lambda text, *, force, redact_url_credentials: text.replace("sk-private", "[redacted]")
+        )
+        with mock.patch.dict("sys.modules", {"agent": types.ModuleType("agent"), "agent.redact": redactor}):
+            self.assertEqual(
+                plugin._summarize_args({"command": "git push --force origin main"}),
+                "command: git push --force origin main",
+            )
+            self.assertEqual(plugin._summarize_args({"token": "sk-private"}), "token: [redacted]")
+            self.assertEqual(plugin._arg_target({"command": "git push --force origin main"}), "git push")
+
 
 class DecisionFieldTest(unittest.TestCase):
     def setUp(self):

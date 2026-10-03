@@ -18,7 +18,7 @@ That installs the plugin into the interpreter Hermes runs in, enables it, and
 selects Pushary as the approval transport after pairing with the phone app. Existing credentials are reused. Run `npx pushary@1.9.3 doctor` afterward. To do it by hand:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.5.8
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.5.9
 ```
 
 Hermes runs in its own virtualenv, so `pip install` must target that interpreter

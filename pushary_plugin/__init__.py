@@ -108,11 +108,21 @@ def _gated_tools():
     return {name.strip().lower() for name in raw.split(",") if name.strip()}
 
 
+def _egress_redactor():
+    try:
+        from agent.redact import redact_for_egress
+    except ImportError:
+        return None
+    return redact_for_egress
+
+
 def _redact_outbound_text(text: str) -> str:
     try:
-        from agent.redact import redact_for_egress, redact_sensitive_text
+        from agent.redact import redact_sensitive_text
 
-        return redact_for_egress(redact_sensitive_text(text, force=True, redact_url_credentials=True))
+        redacted = redact_sensitive_text(text, force=True, redact_url_credentials=True)
+        redact_for_egress = _egress_redactor()
+        return redact_for_egress(redacted) if redact_for_egress else redacted
     except Exception:
         logger.warning("[pushary] host redaction unavailable; omitting outbound detail")
         return "[redaction unavailable]"
