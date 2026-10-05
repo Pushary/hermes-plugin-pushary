@@ -75,7 +75,7 @@ How long your phone has depends on your delivery mode. Under Every time
 (`push_only`) it is Hermes' own `approvals.timeout` (300 seconds by default), so an
 answer is still yours to give minutes after the notification lands. Under When I'm
 out (`push_first`), the default for a new workspace, your phone has the push window,
-10 seconds unless you change it, and then Hermes' own prompt takes over.
+20 seconds unless you change it, and then Hermes' own prompt takes over.
 
 ## Per-tool gating (without the transport)
 
