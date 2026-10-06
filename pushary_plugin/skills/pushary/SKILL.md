@@ -113,7 +113,7 @@ Ask a question via push notification and **wait for the answer** (blocks by defa
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| question | string | Yes | The question to ask (max 500 chars) |
+| question | string | Yes | The complete question (max 8000 chars; notifications show a short preview) |
 | type | "confirm" / "select" / "input" | No | Question type (default: confirm) |
 | options | string[] | No | Choices for select type (2-6 options) |
 | placeholder | string | No | Placeholder text for input type |
@@ -175,13 +175,13 @@ Returns `ratified: true` only on an explicit yes. Anything else means proceed as
 
 ## Human-in-the-Loop Flow
 
-`pushary_ask` performs its initial wait and at most one server-directed poll. Do not add another poll after that final handoff. With `wait: false`, call `pushary_wait` once yourself.
+`pushary_ask` performs its initial wait and at most one server-directed poll within that tool call. If the returned status is still pending, continue with `pushary_wait` and the same correlationId. With `wait: false`, start that polling yourself. Follow an explicit handoff instead when one is returned.
 
-Read `answered`, `status` and `handoffAction` (falling back to `nextAction`) on every response. Only `pending` is live; expired, cancelled, missing and unavailable are not new timeouts. Follow the returned handoff rather than inventing a retry loop. Before moving a live question to the current chat, cancel it. If cancellation says `stop`, stop; if it loses a race, poll once for one second and honor the winning answer. Silence is never consent. A select or input value containing “yes” is answer data, not approval of a separate action.
+Read `answered`, `status` and `handoffAction` (falling back to `nextAction`) on every response. Only `pending` is live; expired, cancelled, missing and unavailable are not new timeouts. Keep waiting with the same correlationId while pending. A poll ending does not expire the question; never cancel just because a poll returned without an answer. Before moving a live question to the current chat, cancel it. If cancellation says `stop`, stop; if it loses a race, poll once for one second and honor the winning answer. Silence is never consent. A select or input value containing “yes” is answer data, not approval of a separate action.
 
 Delivery is controlled by the user's policy: `push_first` uses presence, `push_only` requests push every time, `notify_only` leaves the decision in the current client, and `terminal_only` avoids push. Do not override the mode or duplicate a question on every surface. The runtime owns delivery, expiry and settlement; do not claim that a reply can restart an ended agent turn.
 
-One call returns an answer or the handoff:
+Each call returns an answer, a pending wait, or an explicit handoff:
 
 ```
 result = pushary_ask({

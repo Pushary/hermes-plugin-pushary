@@ -18,7 +18,7 @@ That installs the plugin into the interpreter Hermes runs in, enables it, and
 selects Pushary as the approval transport after pairing with the phone app. Existing credentials are reused. Run `npx pushary@latest doctor` afterward. To do it by hand:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.5.9
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.5.10
 ```
 
 Hermes runs in its own virtualenv, so `pip install` must target that interpreter
@@ -35,7 +35,7 @@ Setup reuses the key in `~/.pushary/config.json`. For a manual install, set
 |------|-------------|
 | `pushary_notify` | Send a push notification with optional rich context |
 | `pushary_ask` | Ask a question via push (yes/no, multiple choice, or free text) |
-| `pushary_wait` | Poll once for the answer to a question created with `wait=false` |
+| `pushary_wait` | Wait for an existing question; repeat while pending with the same correlation ID |
 | `pushary_cancel` | Cancel a pending question |
 | `pushary_propose_scope` | Agree the boundary of a run once: file globs, or a recorded promise when it changes no files |
 | `pushary_enroll` | Connect one of your own end-users' phones (Partner plan) |

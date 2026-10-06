@@ -71,14 +71,14 @@ PUSHARY_ASK = {
         "when present, otherwise nextAction. "
         "Supports three question types: confirm (yes/no), select (multiple choice "
         "with 2-6 options), and input (free text). Set wait=false only when you want "
-        "an immediate correlationId and will call pushary_wait once yourself."
+        "an immediate correlationId and will continue pushary_wait while the question is pending."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "question": {
                 "type": "string",
-                "description": "The question to ask (max 500 chars)",
+                "description": "The question to ask (max 8000 chars)",
             },
             "type": {
                 "type": "string",
@@ -295,7 +295,7 @@ PUSHARY_ASK_END_USER = {
         "properties": {
             "question": {
                 "type": "string",
-                "description": "The question to ask (max 500 chars).",
+                "description": "The question to ask (max 8000 chars).",
             },
             "external_id": {
                 "type": "string",
