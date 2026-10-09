@@ -4,6 +4,8 @@ PUSHARY_REMIND = {
     "parameters": {
         "type": "object",
         "properties": {
+            "request_id": {"type": "string", "description": "Unique scheduling operation ID. Reuse unchanged when retrying."},
+            "reminder_id": {"type": "string", "description": "Look up your reminder outcome instead of scheduling or cancelling."},
             "body": {"type": "string", "maxLength": 180, "description": "At most 180 UTF-16 units after secret redaction; emoji may use two."},
             "title": {"type": "string", "maxLength": 100, "description": "At most 100 UTF-16 units after secret redaction; emoji may use two."},
             "in_minutes": {"type": "integer", "minimum": 1, "maximum": 43200},

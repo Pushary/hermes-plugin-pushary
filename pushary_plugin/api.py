@@ -3,6 +3,7 @@ import hashlib
 import os
 import re
 import time
+from uuid import uuid4
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -316,9 +317,12 @@ def send_notification(title, body, agent_name=None, context=None, **identity_fie
 
 
 def schedule_reminder(body=None, title=None, in_minutes=None, at=None,
-                      cancel_reminder_id=None, agent_name=None, env=None, **identity_fields):
+                      cancel_reminder_id=None, agent_name=None, env=None, request_id=None, reminder_id=None, **identity_fields):
+    if body is not None and request_id is None:
+        request_id = str(uuid4())
     values = {"body": body, "title": title, "inMinutes": in_minutes, "at": at,
-              "cancelReminderId": cancel_reminder_id, "agentName": agent_name, "env": env}
+              "cancelReminderId": cancel_reminder_id, "agentName": agent_name, "env": env,
+              "requestId": request_id, "reminderId": reminder_id}
     params = {key: value for key, value in values.items() if value is not None}
     return _mcp_call("schedule_reminder", _with_decision_fields(params, identity_fields, IDENTITY_PARAM_NAMES))
 

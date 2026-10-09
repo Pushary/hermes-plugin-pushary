@@ -15,11 +15,12 @@ class ReminderTests(unittest.TestCase):
 
     def test_reminder_uses_server_scheduler_and_preserves_identity(self):
         with mock.patch.object(api, '_mcp_call', return_value={'pending': []}) as call:
-            result = json.loads(tools.pushary_remind({'body': 'Check deploy', 'in_minutes': 30, 'session_id': 'session'}))
+            result = json.loads(tools.pushary_remind({'body': 'Check deploy', 'in_minutes': 30, 'session_id': 'session', 'request_id': 'stable-request'}))
         self.assertEqual(result, {'pending': []})
         self.assertEqual(call.call_args.args[0], 'schedule_reminder')
         self.assertEqual(call.call_args.args[1]['inMinutes'], 30)
         self.assertEqual(call.call_args.args[1]['sessionId'], 'session')
+        self.assertEqual(call.call_args.args[1]['requestId'], 'stable-request')
 
     def test_list_and_cancel_do_not_invent_a_schedule(self):
         with mock.patch.object(api, '_mcp_call', return_value={'cancelled': True}) as call:
