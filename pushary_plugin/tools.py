@@ -43,6 +43,17 @@ def pushary_notify(params, **kwargs):
         return json.dumps({"error": str(e)})
 
 
+def pushary_remind(params, **kwargs):
+    try:
+        result = api.schedule_reminder(
+            agent_name=identity.labelled_agent_name(params.get("agent_name")),
+            **_accepted_fields(params, ("body", "title", "in_minutes", "at", "cancel_reminder_id", "env", *api.IDENTITY_PARAM_NAMES)),
+        )
+        return json.dumps(result)
+    except Exception as exc:
+        return json.dumps({"error": str(exc)})
+
+
 def pushary_ask(params, **kwargs):
     question = params.get("question", "")
     question_type = params.get("type", "confirm")

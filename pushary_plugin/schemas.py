@@ -1,3 +1,23 @@
+PUSHARY_REMIND = {
+    "name": "pushary_remind",
+    "description": "Schedule a one-time personal reminder on Pushary, even after Hermes exits. Use body plus in_minutes or at (ISO timestamp with explicit UTC offset, within 30 days). Never guess the user's timezone. Confirm the returned time. No arguments lists pending reminders; cancel_reminder_id cancels a scheduled one. Use Hermes cron for agent work; use this for reminding the operator.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "body": {"type": "string", "maxLength": 180, "description": "At most 180 UTF-16 units after secret redaction; emoji may use two."},
+            "title": {"type": "string", "maxLength": 100, "description": "At most 100 UTF-16 units after secret redaction; emoji may use two."},
+            "in_minutes": {"type": "integer", "minimum": 1, "maximum": 43200},
+            "at": {"type": "string", "description": "Future ISO 8601 time with Z or UTC offset."},
+            "cancel_reminder_id": {"type": "string"},
+            "agent_name": {"type": "string"},
+            "session_id": {"type": "string"},
+            "machine_id": {"type": "string"},
+            "env": {"type": "string", "enum": ["test"]},
+        },
+        "additionalProperties": False,
+    },
+}
+
 PUSHARY_NOTIFY = {
     "name": "pushary_notify",
     "description": (

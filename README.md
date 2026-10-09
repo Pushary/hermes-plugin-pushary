@@ -34,6 +34,7 @@ Setup reuses the key in `~/.pushary/config.json`. For a manual install, set
 | Tool | Description |
 |------|-------------|
 | `pushary_notify` | Send a push notification with optional rich context |
+| `pushary_remind` | Schedule, list or cancel a personal reminder saved on Pushary after Hermes exits |
 | `pushary_ask` | Ask a question via push (yes/no, multiple choice, or free text) |
 | `pushary_wait` | Wait for an existing question; repeat while pending with the same correlation ID |
 | `pushary_cancel` | Cancel a pending question |

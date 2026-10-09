@@ -24,10 +24,13 @@ SYSTEM_PROMPT_SECTION = (
     "the user's policy and presence; do not duplicate a live question in chat. "
     "Confirm notifications can offer lock-screen actions; choices and text open "
     "the app. Personal tools reach the operator; Partner tools use external_id "
-    "to reach an enrolled customer."
+    "to reach an enrolled customer. For a personal reminder later, use pushary_remind; "
+    "it runs on Pushary after Hermes exits. Use Hermes cron for scheduled agent work."
 )
 
 TOOL_REGISTRATIONS = (
+    ("pushary_remind", schemas.PUSHARY_REMIND, "pushary_remind",
+     "Schedule, list or cancel personal reminders on Pushary"),
     ("pushary_notify", schemas.PUSHARY_NOTIFY, "pushary_notify",
      "Send push notification to user's phone"),
     ("pushary_ask", schemas.PUSHARY_ASK, "pushary_ask",

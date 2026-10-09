@@ -1,6 +1,6 @@
 ---
 name: pushary-hermes
-version: 0.8.2
+version: 0.9.0
 description: Push notifications and human-in-the-loop for Hermes Agent. Use this whenever a running agent needs a human and no chat session is active, such as before an irreversible or destructive action, before spending money, deploying, force-pushing or deleting, when blocked on a decision outside your authority, when running unattended and you hit a genuine ambiguity, when another skill's workflow says to confirm with the user, and when a long task finishes or fails with nobody watching. Send alerts when tasks finish, ask questions (yes/no, multiple choice, or free text) via web push, and get answers from their connected devices. Use these tools proactively when the user is not actively in a chat session. Works alongside Hermes's built-in messaging platforms (Telegram, Discord, etc.) as a universal fallback channel.
 metadata:
   hermes:
@@ -73,9 +73,14 @@ Partner customers use scoped enrollment links issued by their application. Do no
 
 ## Tools
 
-Tool names below are the native plugin names. An MCP client without the plugin sees the same capabilities as `send_notification`, `ask_user`, `wait_for_answer`, `cancel_question`, and `propose_scope`.
+Tool names below are the native plugin names. An MCP client without the plugin sees the same capabilities as `send_notification`, `schedule_reminder`, `ask_user`, `wait_for_answer`, `cancel_question`, and `propose_scope`.
+
+### pushary_remind
+
+For personal reminders later, use `pushary_remind` with `body` and `in_minutes`, or `at` with an explicit UTC offset. Never guess the timezone; confirm the returned time. Pushary saves it and delivers after Hermes exits. Use Hermes cron for future agent work. No arguments lists pending reminders; `cancel_reminder_id` cancels a scheduled one. One-time only, up to 30 days ahead, and delivery can be about a minute late. A connected phone is required. Do not use `pushary_ask` for reminders.
 
 ### pushary_notify
+
 
 Send a one-way push notification. Optionally include structured context for a rich detail page.
 

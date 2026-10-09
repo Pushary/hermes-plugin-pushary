@@ -315,6 +315,14 @@ def send_notification(title, body, agent_name=None, context=None, **identity_fie
     )
 
 
+def schedule_reminder(body=None, title=None, in_minutes=None, at=None,
+                      cancel_reminder_id=None, agent_name=None, env=None, **identity_fields):
+    values = {"body": body, "title": title, "inMinutes": in_minutes, "at": at,
+              "cancelReminderId": cancel_reminder_id, "agentName": agent_name, "env": env}
+    params = {key: value for key, value in values.items() if value is not None}
+    return _mcp_call("schedule_reminder", _with_decision_fields(params, identity_fields, IDENTITY_PARAM_NAMES))
+
+
 def ask_user(question, question_type="confirm", options=None, placeholder=None,
              context=None, agent_name=None, wait=True, timeout_ms=None, **decision):
     params = {"question": question, "type": question_type, "wait": wait}
