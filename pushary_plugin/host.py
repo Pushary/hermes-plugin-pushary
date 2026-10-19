@@ -1,3 +1,5 @@
+import os
+
 TRANSPORT_NAME = "pushary"
 
 HOOK_TIMEOUT_DEFAULT_SECONDS = 30.0
@@ -30,20 +32,35 @@ def _section(node, *path):
     return node if isinstance(node, dict) else {}
 
 
-def _hermes_version():
-    """This Hermes as a comparable tuple, or None when it will not say."""
-    raw = None
+def profile_secret(name):
+    try:
+        from agent.secret_scope import get_secret
+    except Exception:
+        return os.environ.get(name) or None
+    try:
+        return get_secret(name) or None
+    except Exception:
+        return None
+
+
+def hermes_version_label():
     try:
         from importlib.metadata import version
 
-        raw = version("hermes-cli")
+        return version("hermes-cli")
     except Exception:
         try:
             import hermes_cli
 
-            raw = getattr(hermes_cli, "__version__", None)
+            label = getattr(hermes_cli, "__version__", None)
         except Exception:
-            raw = None
+            return None
+    return str(label) if label else None
+
+
+def _hermes_version():
+    """This Hermes as a comparable tuple, or None when it will not say."""
+    raw = hermes_version_label()
     if not raw:
         return None
     parts = []

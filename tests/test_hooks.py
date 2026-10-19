@@ -1,13 +1,26 @@
 import json
 import os
+import threading
 import tempfile
+import time
 import types
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import pushary_plugin as plugin
-from pushary_plugin import api, approval, host, identity, tools
+from pushary_plugin import api, approval, host, identity, installation, tools
+
+SANDBOX_HERMES_HOME = tempfile.TemporaryDirectory(prefix="pushary-hermes-home-")
+
+
+def setUpModule():
+    os.environ["HERMES_HOME"] = SANDBOX_HERMES_HOME.name
+
+
+def tearDownModule():
+    os.environ.pop("HERMES_HOME", None)
+    SANDBOX_HERMES_HOME.cleanup()
 
 
 class FakeCtx:
@@ -61,6 +74,7 @@ class FakeRequest:
 def reset_state():
     plugin._session_totals.update(tools=0, errors=0, notified=0)
     plugin._last_turn.update(completed=False, interrupted=False)
+    plugin._plugin_activity.update(attempted=True)
     identity.forget_session()
 
 
@@ -723,6 +737,303 @@ class TransportTimeoutTests(unittest.TestCase):
             ]:
                 api._mcp_call(name, params)
                 self.assertEqual(send.call_args.kwargs["timeout"], expected)
+
+
+def write_install_marker(directory, **fields):
+    marker = {"owner": "pushary", "installedBy": "cli", "version": "0.8.0", "routeQuestions": True}
+    marker.update(fields)
+    (Path(directory) / installation.INSTALL_MARKER_FILE).write_text(json.dumps(marker), encoding="utf-8")
+
+
+class QuestionRoutingTest(unittest.TestCase):
+    def setUp(self):
+        reset_state()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.plugin_directory = directory.name
+        patched = mock.patch.object(installation, "PLUGIN_DIRECTORY", Path(directory.name))
+        patched.start()
+        self.addCleanup(patched.stop)
+        os.environ["PUSHARY_API_KEY"] = "pk_test.sk_test"
+        self.addCleanup(os.environ.pop, "PUSHARY_API_KEY", None)
+
+    def test_clarify_goes_to_pushary_when_pushary_setup_installed_this_copy(self):
+        write_install_marker(self.plugin_directory)
+        result = plugin._on_pre_tool_call(tool_name="clarify", args={"question": "Which branch?"})
+        self.assertEqual(result["action"], "block")
+        self.assertIn("pushary_ask", result["message"])
+
+    def test_clarify_stays_with_hermes_for_a_copy_pushary_setup_did_not_install(self):
+        self.assertIsNone(plugin._on_pre_tool_call(tool_name="clarify", args={}))
+
+    def test_clarify_stays_with_hermes_when_setup_chose_not_to_route_questions(self):
+        write_install_marker(self.plugin_directory, routeQuestions=False)
+        self.assertIsNone(plugin._on_pre_tool_call(tool_name="clarify", args={}))
+
+    def test_clarify_stays_with_hermes_without_a_key_to_ask_with(self):
+        write_install_marker(self.plugin_directory)
+        os.environ.pop("PUSHARY_API_KEY", None)
+        with mock.patch.object(api, "_configured_key", return_value=None):
+            self.assertIsNone(plugin._on_pre_tool_call(tool_name="clarify", args={}))
+
+    def test_a_marker_another_tool_wrote_is_ignored(self):
+        write_install_marker(self.plugin_directory, owner="someone-else")
+        self.assertIsNone(plugin._on_pre_tool_call(tool_name="clarify", args={}))
+
+    def test_the_prompt_names_pushary_ask_only_when_questions_are_routed(self):
+        self.assertNotIn("not clarify", plugin.system_prompt_section())
+        write_install_marker(self.plugin_directory)
+        self.assertIn("pushary_ask, not clarify", plugin.system_prompt_section())
+
+
+def hermes_secret_scope(get_secret):
+    package = types.ModuleType("agent")
+    module = types.ModuleType("agent.secret_scope")
+    module.get_secret = get_secret
+    package.secret_scope = module
+    return mock.patch.dict("sys.modules", {"agent": package, "agent.secret_scope": module})
+
+
+def secret_scope_refusal(name, default=None):
+    raise RuntimeError("no profile scope")
+
+
+class CatalogRulesTest(unittest.TestCase):
+    def setUp(self):
+        reset_state()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.use_plugin_directory(self.root / "plugins" / "pushary")
+        config = self.root / "config.json"
+        config.write_text(json.dumps({"apiKey": "pk_from_pushary_config"}), encoding="utf-8")
+        environment = mock.patch.dict(os.environ, {"PUSHARY_CONFIG_FILE": str(config)})
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop("PUSHARY_API_KEY", None)
+        without_secret_scopes = mock.patch.dict("sys.modules", {"agent": None, "agent.secret_scope": None})
+        without_secret_scopes.start()
+        self.addCleanup(without_secret_scopes.stop)
+
+    def use_plugin_directory(self, directory):
+        directory.mkdir(parents=True, exist_ok=True)
+        patched = mock.patch.object(installation, "PLUGIN_DIRECTORY", directory)
+        patched.start()
+        self.addCleanup(patched.stop)
+        self.plugin_directory = directory
+
+    def test_a_catalog_copy_never_reads_the_pushary_config_file(self):
+        self.assertTrue(installation.follows_catalog_rules())
+        self.assertFalse(api.is_configured())
+
+    def test_a_copy_pushary_installed_reads_the_pushary_config_file(self):
+        write_install_marker(self.plugin_directory)
+        self.assertFalse(installation.follows_catalog_rules())
+        self.assertEqual(api._configured_key(), "pk_from_pushary_config")
+
+    def test_a_pip_copy_reads_the_pushary_config_file(self):
+        self.use_plugin_directory(self.root / "site-packages" / "pushary_plugin")
+        self.assertFalse(installation.follows_catalog_rules())
+        self.assertEqual(api._configured_key(), "pk_from_pushary_config")
+
+    def test_a_catalog_copy_reads_the_key_hermes_runs_with(self):
+        os.environ["PUSHARY_API_KEY"] = "pk_from_process"
+        self.assertEqual(api._configured_key(), "pk_from_process")
+
+    def test_the_key_comes_from_the_hermes_profile_when_hermes_scopes_secrets(self):
+        os.environ["PUSHARY_API_KEY"] = "pk_from_process"
+        with hermes_secret_scope(lambda name, default=None: "pk_from_profile" if name == api.API_KEY_VARIABLE else default):
+            self.assertEqual(api._configured_key(), "pk_from_profile")
+
+    def test_a_refused_secret_leaves_a_catalog_copy_without_a_key(self):
+        os.environ["PUSHARY_API_KEY"] = "pk_from_process"
+        with hermes_secret_scope(secret_scope_refusal):
+            self.assertFalse(api.is_configured())
+
+    def test_a_refused_secret_leaves_a_copy_pushary_installed_on_the_pushary_config_file(self):
+        write_install_marker(self.plugin_directory)
+        with hermes_secret_scope(secret_scope_refusal):
+            self.assertEqual(api._configured_key(), "pk_from_pushary_config")
+
+    def test_a_catalog_copy_never_reports_that_it_loaded(self):
+        os.environ["PUSHARY_API_KEY"] = "pk_from_process"
+        plugin._plugin_activity.update(attempted=False)
+        with mock.patch.object(api, "report_plugin_active") as report:
+            self.assertIsNone(plugin._report_plugin_active_once("session-1"))
+        report.assert_not_called()
+
+    def test_a_copy_pushary_installed_reports_once_that_it_loaded(self):
+        write_install_marker(self.plugin_directory)
+        os.environ["PUSHARY_API_KEY"] = "pk_from_process"
+        plugin._plugin_activity.update(attempted=False)
+        with mock.patch.object(api, "report_plugin_active") as report:
+            plugin._report_plugin_active_once("session-1").join(1)
+        report.assert_called_once_with("session-1")
+
+
+class LoadRecordTest(unittest.TestCase):
+    def setUp(self):
+        reset_state()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.home = Path(directory.name)
+        patched = mock.patch.dict(os.environ, {"HERMES_HOME": directory.name})
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def own_record(self):
+        record_path = installation.load_records_directory(self.home) / f"{os.getpid()}.json"
+        return json.loads(record_path.read_text(encoding="utf-8"))
+
+    def test_registering_records_which_plugin_loaded_in_this_process(self):
+        plugin.register(FakeCtx())
+        record = self.own_record()
+        self.assertEqual(record["pid"], os.getpid())
+        self.assertEqual(record["pluginVersion"], installation.plugin_version())
+        self.assertTrue(record["approvalTransport"])
+
+    def test_a_host_that_refuses_the_transport_is_recorded_as_such(self):
+        plugin.register(LegacyCtx())
+        self.assertFalse(self.own_record()["approvalTransport"])
+
+    def test_week_old_records_from_exited_processes_are_pruned(self):
+        directory = installation.load_records_directory(self.home)
+        directory.mkdir(parents=True)
+        stale = directory / "11.json"
+        recent = directory / "12.json"
+        stale.write_text("{}", encoding="utf-8")
+        recent.write_text("{}", encoding="utf-8")
+        now = 2_000_000_000
+        os.utime(stale, (now - installation.LOAD_RECORD_RETENTION_SECONDS - 1,) * 2)
+        os.utime(recent, (now - 60,) * 2)
+        with mock.patch.object(installation, "_process_is_running", return_value=False):
+            installation.record_plugin_load(True, home=self.home, pid=13, now=now)
+        self.assertFalse(stale.exists())
+        self.assertTrue(recent.exists())
+        self.assertTrue((directory / "13.json").exists())
+
+    def test_a_week_old_record_of_a_gateway_still_running_is_kept(self):
+        directory = installation.load_records_directory(self.home)
+        directory.mkdir(parents=True)
+        gateway = directory / "21.json"
+        gateway.write_text("{}", encoding="utf-8")
+        now = 2_000_000_000
+        os.utime(gateway, (now - installation.LOAD_RECORD_RETENTION_SECONDS - 1,) * 2)
+        with mock.patch.object(installation, "_process_is_running", side_effect=lambda pid: pid == 21):
+            installation.record_plugin_load(True, home=self.home, pid=22, now=now)
+        self.assertTrue(gateway.exists())
+
+    def test_this_process_counts_as_running(self):
+        self.assertTrue(installation._process_is_running(os.getpid()))
+
+    def test_an_unwritable_home_never_breaks_registration(self):
+        blocker = self.home / "not-a-directory"
+        blocker.write_text("", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"HERMES_HOME": str(blocker)}):
+            self.assertIsNone(installation.record_plugin_load(True))
+            plugin.register(FakeCtx())
+
+
+class PluginVersionTest(unittest.TestCase):
+    def test_the_manifest_package_and_readme_name_one_version(self):
+        root = Path(__file__).resolve().parent.parent
+        version = installation.plugin_version()
+        self.assertTrue(version)
+        self.assertIn(f'version = "{version}"', (root / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn(f"hermes-plugin-pushary=={version}", (root / "README.md").read_text(encoding="utf-8"))
+
+    def test_session_events_send_no_versions(self):
+        reset_state()
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b"{}"
+        with mock.patch.object(api, "_get_api_key", return_value="pk_test.sk_test"), \
+                mock.patch.object(installation, "LOADED_HERMES_VERSION", "0.22.2"), \
+                mock.patch.object(api.urllib.request, "urlopen", return_value=response) as send:
+            api.agent_event("session_start", "s1")
+        payload = json.loads(send.call_args.args[0].data.decode("utf-8"))
+        self.assertNotIn("adapterVersion", payload)
+        self.assertNotIn("agentVersion", payload)
+
+    def test_a_host_that_will_not_say_its_version_sends_no_version_field(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.status = 200
+        with mock.patch.object(api, "_get_api_key", return_value="pk_test.sk_test"), \
+                mock.patch.object(installation, "LOADED_HERMES_VERSION", None), \
+                mock.patch.object(api.urllib.request, "urlopen", return_value=response) as send:
+            api.report_plugin_active("s1")
+        payload = json.loads(send.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(payload["adapterVersion"], installation.LOADED_PLUGIN_VERSION)
+        self.assertNotIn("agentVersion", payload)
+
+
+class PluginActivityTest(unittest.TestCase):
+    def setUp(self):
+        reset_state()
+        plugin._plugin_activity.update(attempted=False)
+        self.addCleanup(plugin._plugin_activity.update, attempted=True)
+        os.environ["PUSHARY_API_KEY"] = "pk_test.sk_test"
+        self.addCleanup(os.environ.pop, "PUSHARY_API_KEY", None)
+
+    def test_the_first_session_reports_the_plugin_once_per_process(self):
+        with mock.patch.object(api, "report_plugin_active", return_value=False) as report:
+            first = plugin._report_plugin_active_once("s1")
+            second = plugin._report_plugin_active_once("s2")
+            first.join(timeout=5)
+        self.assertIsNone(second)
+        report.assert_called_once_with("s1")
+
+    def test_session_start_never_waits_for_the_report(self):
+        sent = threading.Event()
+        release = threading.Event()
+
+        def slow_report(session_id):
+            sent.set()
+            release.wait(timeout=5)
+
+        with mock.patch.object(api, "agent_event", return_value={}), \
+                mock.patch.object(api, "report_plugin_active", side_effect=slow_report):
+            started = time.monotonic()
+            plugin._on_session_start(session_id="s1")
+            waited = time.monotonic() - started
+            self.assertTrue(sent.wait(timeout=5))
+            release.set()
+        self.assertLess(waited, 1)
+
+    def test_the_report_is_the_activation_beacon_with_versions(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.status = 200
+        with mock.patch.object(api.urllib.request, "urlopen", return_value=response) as send:
+            self.assertTrue(api.report_plugin_active("s1"))
+        payload = json.loads(send.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(payload["event"], "agent_hook_active")
+        self.assertEqual(payload["agentType"], "hermes")
+        self.assertEqual(payload["adapterVersion"], installation.LOADED_PLUGIN_VERSION)
+        self.assertEqual(send.call_args.kwargs["timeout"], api.PLUGIN_ACTIVE_TIMEOUT_SECONDS)
+
+    def test_an_offline_report_fails_quietly(self):
+        with mock.patch.object(api.urllib.request, "urlopen", side_effect=OSError("offline")):
+            self.assertFalse(api.report_plugin_active("s1"))
+
+
+class SharedMachineIdTest(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.path = Path(directory.name) / "machine-id"
+
+    def test_uses_the_machine_id_the_cli_and_mac_app_share(self):
+        self.path.write_text("dc669fbe-6c5a-4915-9bd0-e5888047a2e0\n", encoding="utf-8")
+        with mock.patch.object(identity, "SHARED_MACHINE_ID_FILE", self.path):
+            self.assertEqual(identity.machine_id(), "dc669fbe-6c5a-4915-9bd0-e5888047a2e0")
+
+    def test_a_malformed_shared_id_falls_back_to_the_hostname_hash(self):
+        self.path.write_text("not a machine id\n", encoding="utf-8")
+        with mock.patch.object(identity, "SHARED_MACHINE_ID_FILE", self.path):
+            self.assertEqual(identity.machine_id(), identity.hostname_machine_id())
+
+    def test_no_shared_id_falls_back_to_the_hostname_hash(self):
+        with mock.patch.object(identity, "SHARED_MACHINE_ID_FILE", self.path):
+            self.assertEqual(identity.machine_id(), identity.hostname_machine_id())
 
 
 if __name__ == "__main__":

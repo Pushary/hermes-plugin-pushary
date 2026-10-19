@@ -9,9 +9,12 @@ import urllib.error
 import urllib.parse
 from pathlib import Path
 
-from . import identity
+from . import host, identity, installation
 
 BASE_URL = os.environ.get("PUSHARY_BASE_URL", "https://pushary.com")
+API_KEY_VARIABLE = "PUSHARY_API_KEY"
+PLUGIN_ACTIVE_EVENT = "agent_hook_active"
+PLUGIN_ACTIVE_TIMEOUT_SECONDS = 3
 SERVER_BASE = f"{BASE_URL}/api/v1/server"
 
 PENDING_DIR = Path.home() / ".pushary" / "run" / "hermes-commands"
@@ -120,9 +123,13 @@ def is_configured():
 
 
 def _configured_key():
-    key = os.environ.get("PUSHARY_API_KEY")
-    if key:
+    key = host.profile_secret(API_KEY_VARIABLE)
+    if key or installation.follows_catalog_rules():
         return key
+    return _key_in_pushary_config()
+
+
+def _key_in_pushary_config():
     path = Path(os.environ.get("PUSHARY_CONFIG_FILE", "")).expanduser() \
         if os.environ.get("PUSHARY_CONFIG_FILE") else Path.home() / ".pushary" / "config.json"
     try:
@@ -136,16 +143,53 @@ def _get_api_key():
     key = _configured_key()
     if not key:
         raise ValueError(
-            "PUSHARY_API_KEY not set. Get your key at https://pushary.com/sign-up?from=hermes"
+            f"{API_KEY_VARIABLE} is not set. Save it in Hermes with: hermes config set {API_KEY_VARIABLE} <your key>, "
+            "then restart Hermes. Get a key at https://pushary.com/sign-up?from=hermes"
         )
     return key
+
+
+def _with_versions(payload):
+    for field, value in (
+        ("adapterVersion", installation.LOADED_PLUGIN_VERSION),
+        ("agentVersion", installation.LOADED_HERMES_VERSION),
+    ):
+        if value:
+            payload[field] = value
+    return payload
+
+
+def _agent_event_request(payload):
+    return urllib.request.Request(
+        f"{BASE_URL}/api/agent/event",
+        data=json.dumps(_with_identity(payload)).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {_get_api_key()}",
+        },
+        method="POST",
+    )
+
+
+def report_plugin_active(session_id):
+    try:
+        request = _agent_event_request(_with_versions({
+            "event": PLUGIN_ACTIVE_EVENT,
+            "agentType": "hermes",
+            "agentName": identity.agent_name(),
+            "sessionId": session_id,
+        }))
+        with urllib.request.urlopen(request, timeout=PLUGIN_ACTIVE_TIMEOUT_SECONDS) as response:
+            return 200 <= response.status < 300
+    except Exception:
+        return False
 
 
 def agent_event(event, session_id, can_drain=False):
     """Report a Hermes session and pick up a queued notch instruction."""
     try:
         pending = _read_pending(session_id) if can_drain else None
-        payload = _with_identity({
+        req = _agent_event_request({
             "event": event,
             "agentType": "hermes",
             "agentName": identity.agent_name(),
@@ -154,15 +198,6 @@ def agent_event(event, session_id, can_drain=False):
             "ackMode": can_drain and pending is None,
             "skipCommandDrain": pending is not None,
         })
-        req = urllib.request.Request(
-            f"{BASE_URL}/api/agent/event",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {_get_api_key()}",
-            },
-            method="POST",
-        )
         with urllib.request.urlopen(req, timeout=10) as resp:
             raw = resp.read().decode("utf-8")
         result = json.loads(raw) if raw.strip() else {}

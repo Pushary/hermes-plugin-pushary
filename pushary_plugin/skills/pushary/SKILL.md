@@ -43,7 +43,9 @@ Use an extra push only when the user requested it or a meaningful unattended res
 
 ## Setup
 
-The operator configures `PUSHARY_API_KEY` or pairs their devices through the Pushary app, then sets `security.approval.transport: pushary`. The catalog-installed plugin already registers its tools natively; do not run another installer or install a second plugin copy. No MCP server configuration is needed. Keep credentials out of chat and verify the paired account and device.
+On a Mac, the Pushary app connects Hermes: it puts this plugin in `~/.hermes/plugins/pushary` and selects Pushary as the approval transport. On any computer, `npx pushary@latest setup --agents hermes` does the same. The plugin can also come from the Hermes catalog with `hermes plugins install pushary`. Never install a second copy over one that is already there. No MCP server configuration is needed. Keep credentials out of chat and verify the paired account and device.
+
+If the `pushary_*` tools are missing from a Hermes session, the plugin did not load. Do not pip-install it into Hermes's Python: current Hermes does not load packages added that way. Ask the user to open the Pushary app and repair Hermes, or to run `npx pushary@latest setup --agents hermes`. Then they restart Hermes with `hermes gateway restart`.
 
 ## Approvals Go to the Phone
 

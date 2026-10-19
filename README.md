@@ -4,30 +4,83 @@ Push notifications and human-in-the-loop for [Hermes Agent](https://hermes-agent
 
 ## Install
 
-If installed through Hermes's catalog, the plugin is already present. Configure
-`PUSHARY_API_KEY` or pair through the Pushary app, then select the approval
-transport below. Do not run a second installer over the catalog copy.
-
-For a standalone installation, these are operator-only shell steps:
+These are operator-only shell steps:
 
 ```bash
 npx pushary@latest setup --agents hermes
 ```
 
-That installs the plugin into the interpreter Hermes runs in, enables it, and
-selects Pushary as the approval transport after pairing with the phone app. Existing credentials are reused. Run `npx pushary@latest doctor` afterward. To do it by hand:
+That writes this plugin to `~/.hermes/plugins/pushary`, the folder where Hermes
+keeps your own plugins. The folder survives `hermes update`. After pairing with
+the phone app, setup turns the plugin on with Hermes's own commands:
+`hermes plugins enable pushary`, then `hermes config set` to select Pushary as
+the approval transport. Existing credentials are reused. Connecting Hermes in the
+Pushary Mac app does the same.
+
+Restart Hermes so it loads the plugin, then check it:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.7.0
+hermes gateway restart
+npx pushary@latest doctor
 ```
 
-Hermes runs in its own virtualenv, so `pip install` must target that interpreter
-rather than your system Python. Add `pushary` to `plugins.enabled` in your Hermes config for a manual pip install.
+If you installed it from Hermes's catalog (`hermes plugins install pushary`),
+the plugin is already present. If the install did not ask for `PUSHARY_API_KEY`,
+save it with `hermes config set PUSHARY_API_KEY <your key>`. Then select the
+approval transport below. Never install a second copy over an existing one.
+
+### Install by hand
+
+Copy the `pushary_plugin` folder from this repository into Hermes's plugins
+folder, turn it on, and restart Hermes:
+
+```bash
+git clone --depth 1 https://github.com/Pushary/hermes-plugin-pushary /tmp/hermes-plugin-pushary
+mkdir -p ~/.hermes/plugins
+cp -R /tmp/hermes-plugin-pushary/pushary_plugin ~/.hermes/plugins/pushary
+hermes config set security.approval.transport pushary
+hermes config set security.approval.transport_fallback builtin
+hermes plugins enable pushary
+hermes gateway restart
+```
+
+Hermes v0.21.6 and later manage their own Python, and Hermes does not support
+installing plugins into it with pip. Only a Hermes older than v0.21.6 still runs
+from its own virtualenv. There, you can install the package with that
+virtualenv's Python and add `pushary` to `plugins.enabled`:
+
+```bash
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.8.0
+```
 
 ## Setup
 
-Setup reuses the key in `~/.pushary/config.json`. For a manual install, set
-`PUSHARY_API_KEY` instead.
+The plugin reads `PUSHARY_API_KEY` through Hermes, which looks in the active
+profile's `.env` (`~/.hermes/.env` by default) and in the environment Hermes
+runs with. `hermes config set PUSHARY_API_KEY <your key>` saves it there. A copy
+installed from Hermes's catalog, or copied in by hand, uses only that.
+
+A copy that `npx pushary setup` or the Pushary Mac app installed, and a pip
+install, also fall back to the key in `~/.pushary/config.json`, which is where
+setup and the Mac app keep it.
+
+## What it reads and sends
+
+- **Network.** Only pushary.com, or `PUSHARY_BASE_URL` when set. Session events
+  on every turn, with a machine id. The questions you send. The approvals Hermes
+  routes to Pushary, which carry the command (up to 4,000 characters) and its
+  description after Hermes has redacted secrets from both. Gated tool arguments
+  and at most three tool errors per session, redacted by Hermes first.
+- **Machine id.** `~/.pushary/machine-id` when it exists, so Hermes and your
+  other agents count as one machine. Otherwise a hash of the hostname.
+- **Files.** Messages queued in the Pushary app wait in
+  `~/.pushary/run/hermes-commands` until a turn picks them up. The plugin notes
+  which Hermes process loaded it in `plugin-data/pushary/loaded/` in the Hermes
+  home.
+- **Credentials.** `PUSHARY_API_KEY`, as described under Setup.
+- **Usage report.** Once each time Hermes starts, the plugin reports that it
+  loaded, with the plugin and Hermes versions. A copy from Hermes's catalog, or
+  one copied into Hermes's plugins folder by hand, never sends it.
 
 ## Tools
 
@@ -145,7 +198,8 @@ Hermes it is running inside: that every hook it registers is one Hermes fires,
 that the callback budget it clamps to is the one Hermes enforces, and that the
 approval request still carries what the transport reads. It skips where Hermes
 is not importable, so run it with the interpreter Hermes uses, and after a
-Hermes upgrade:
+Hermes upgrade. On a Hermes older than v0.21.6, that interpreter is in its
+virtualenv:
 
 ```bash
 PYTHONPATH=. ~/.hermes/hermes-agent/venv/bin/python3 -m unittest discover -s tests

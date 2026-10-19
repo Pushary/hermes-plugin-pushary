@@ -1,14 +1,23 @@
 import json
 import logging
 import os
+import threading
 from pathlib import Path
 
-from . import api, approval, host, identity, schemas, tools
+from . import api, approval, host, identity, installation, schemas, tools
 
 logger = logging.getLogger(__name__)
 
 MAX_ERROR_NOTIFICATIONS = 3
 SYSTEM_PROMPT_SECTION_ID = "pushary.reach-the-human"
+HERMES_QUESTION_TOOL = "clarify"
+QUESTION_ROUTING_PROMPT = (
+    " Ask the operator questions with pushary_ask, not clarify: clarify is routed to Pushary."
+)
+QUESTION_TOOL_REDIRECT = (
+    "Ask this with pushary_ask instead. Pushary routes Hermes questions to the "
+    "operator's phone and Mac, so they can answer when nobody is at this terminal."
+)
 
 SYSTEM_PROMPT_SECTION = (
     "Pushary reaches the operator when they are away. Honor authorization already "
@@ -49,6 +58,8 @@ TOOL_REGISTRATIONS = (
 
 _session_totals = {"tools": 0, "errors": 0, "notified": 0}
 _last_turn = {"completed": False, "interrupted": False}
+_plugin_activity = {"attempted": False}
+_plugin_activity_lock = threading.Lock()
 
 
 def register(ctx):
@@ -82,6 +93,8 @@ def register(ctx):
             if child.is_dir() and skill_md.exists():
                 ctx.register_skill(child.name, skill_md)
 
+    installation.record_plugin_load(transport)
+
     logger.info(
         "[pushary] Plugin registered: %d tools, %d hooks, approval transport %s",
         len(TOOL_REGISTRATIONS),
@@ -99,9 +112,15 @@ def _register_approval_transport(ctx):
         return False
 
 
+def system_prompt_section():
+    if installation.routes_questions():
+        return SYSTEM_PROMPT_SECTION + QUESTION_ROUTING_PROMPT
+    return SYSTEM_PROMPT_SECTION
+
+
 def _register_system_prompt_section(ctx):
     try:
-        ctx.register_system_prompt_section(SYSTEM_PROMPT_SECTION_ID, SYSTEM_PROMPT_SECTION)
+        ctx.register_system_prompt_section(SYSTEM_PROMPT_SECTION_ID, system_prompt_section())
     except Exception as exc:
         logger.debug("[pushary] system prompt section unavailable: %s", exc)
 
@@ -191,8 +210,19 @@ def _block_undeliverable(tool_name):
     }
 
 
+def _redirects_question_tool(tool_name):
+    return (
+        (tool_name or "").lower() == HERMES_QUESTION_TOOL
+        and installation.routes_questions()
+        and api.is_configured()
+    )
+
+
 def _on_pre_tool_call(tool_name=None, args=None, session_id=None, **kwargs):
     identity.remember_session(session_id)
+
+    if _redirects_question_tool(tool_name):
+        return {"action": "block", "message": QUESTION_TOOL_REDIRECT}
 
     gated = _gated_tools()
     if not gated:
@@ -304,6 +334,25 @@ def _on_session_start(session_id=None, **kwargs):
     _session_totals.update(tools=0, errors=0, notified=0)
     _last_turn.update(completed=False, interrupted=False)
     _report_session_event("session_start", session_id, can_drain=True)
+    _report_plugin_active_once(session_id)
+
+
+def _claim_plugin_active_report():
+    with _plugin_activity_lock:
+        if _plugin_activity["attempted"]:
+            return False
+        _plugin_activity["attempted"] = True
+        return True
+
+
+def _report_plugin_active_once(session_id):
+    if not session_id or installation.follows_catalog_rules() or not api.is_configured():
+        return None
+    if not _claim_plugin_active_report():
+        return None
+    report = threading.Thread(target=api.report_plugin_active, args=(session_id,), name="pushary-plugin-active", daemon=True)
+    report.start()
+    return report
 
 
 def _on_pre_llm_call(session_id=None, **kwargs):

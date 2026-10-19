@@ -1,10 +1,23 @@
 import inspect
+import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import pushary_plugin as plugin
-from pushary_plugin import approval, host
+from pushary_plugin import approval, host, installation
+
+SANDBOX_HERMES_HOME = tempfile.TemporaryDirectory(prefix="pushary-hermes-home-")
+
+
+def setUpModule():
+    os.environ["HERMES_HOME"] = SANDBOX_HERMES_HOME.name
+
+
+def tearDownModule():
+    os.environ.pop("HERMES_HOME", None)
+    SANDBOX_HERMES_HOME.cleanup()
 
 # What this plugin assumes about the host it runs inside.
 #
@@ -38,9 +51,21 @@ requires_hermes = unittest.skipIf(
 
 # The hook-callback timeout arrived after 0.20.5. Both generations are live, so
 # the contract is version-aware rather than pinned to the newer one.
-BOUNDS_HOOKS = hermes_plugins is not None and hasattr(
-    hermes_plugins, "_HOOK_TIMEOUT_FAIL_CLOSED_HOOKS"
-)
+def _hook_timeout_module():
+    if hermes_plugins is None:
+        return None
+    try:
+        from hermes_cli import plugins_dispatch
+    except Exception:
+        plugins_dispatch = None
+    for module in (plugins_dispatch, hermes_plugins):
+        if module is not None and hasattr(module, "_HOOK_TIMEOUT_FAIL_CLOSED_HOOKS"):
+            return module
+    return None
+
+
+HOOK_TIMEOUTS = _hook_timeout_module()
+BOUNDS_HOOKS = HOOK_TIMEOUTS is not None
 
 requires_bounded_hooks = unittest.skipUnless(
     BOUNDS_HOOKS, "this Hermes runs plugin hooks to completion"
@@ -78,22 +103,22 @@ class HookContractTest(unittest.TestCase):
 
     @requires_bounded_hooks
     def test_pre_tool_call_still_fails_closed_on_timeout(self):
-        self.assertIn("pre_tool_call", hermes_plugins._HOOK_TIMEOUT_FAIL_CLOSED_HOOKS)
+        self.assertIn("pre_tool_call", HOOK_TIMEOUTS._HOOK_TIMEOUT_FAIL_CLOSED_HOOKS)
 
     @requires_bounded_hooks
     def test_session_finalize_is_still_unbounded(self):
-        bounded = hermes_plugins._HOOK_TIMEOUT_BOUNDED_HOOKS
-        fail_closed = hermes_plugins._HOOK_TIMEOUT_FAIL_CLOSED_HOOKS
+        bounded = HOOK_TIMEOUTS._HOOK_TIMEOUT_BOUNDED_HOOKS
+        fail_closed = HOOK_TIMEOUTS._HOOK_TIMEOUT_FAIL_CLOSED_HOOKS
         self.assertNotIn("on_session_finalize", bounded | fail_closed)
 
     @requires_bounded_hooks
     def test_the_hook_budget_we_clamp_to_matches_the_hosts_default(self):
         self.assertEqual(
-            hermes_plugins._HOOK_CALLBACK_TIMEOUT_SECS,
+            HOOK_TIMEOUTS._HOOK_CALLBACK_TIMEOUT_SECS,
             host.HOOK_TIMEOUT_DEFAULT_SECONDS,
         )
         self.assertEqual(
-            hermes_plugins._MAX_HOOK_CALLBACK_TIMEOUT_SECS,
+            HOOK_TIMEOUTS._MAX_HOOK_CALLBACK_TIMEOUT_SECS,
             host.HOOK_TIMEOUT_MAX_SECONDS,
         )
 
@@ -101,7 +126,7 @@ class HookContractTest(unittest.TestCase):
     def test_our_default_wait_fits_inside_the_hosts_default_budget(self):
         self.assertLess(
             host.gate_budget_seconds(host.GATE_MAX_SECONDS),
-            hermes_plugins._HOOK_CALLBACK_TIMEOUT_SECS,
+            HOOK_TIMEOUTS._HOOK_CALLBACK_TIMEOUT_SECS,
         )
 
     @unittest.skipIf(BOUNDS_HOOKS, "this Hermes bounds plugin hooks")
@@ -142,9 +167,20 @@ class RegistrationContractTest(unittest.TestCase):
     def test_our_prompt_section_fits_the_position_and_size_hermes_allows(self):
         self.assertIn("after_memory", hermes_plugins.SYSTEM_PROMPT_SECTION_POSITIONS)
         self.assertLessEqual(
-            len(plugin.SYSTEM_PROMPT_SECTION),
+            len(plugin.SYSTEM_PROMPT_SECTION + plugin.QUESTION_ROUTING_PROMPT),
             hermes_plugins.MAX_SYSTEM_PROMPT_SECTION_CHARS,
         )
+
+    def test_the_question_tool_we_redirect_is_hermes_own(self):
+        import toolsets
+
+        self.assertIn(plugin.HERMES_QUESTION_TOOL, toolsets.TOOLSETS[plugin.HERMES_QUESTION_TOOL]["tools"])
+
+    def test_load_records_live_in_hermes_plugin_data(self):
+        from hermes_constants import get_hermes_home
+
+        plugin_data = Path(get_hermes_home()) / "plugin-data" / installation.PLUGIN_DATA_NAMESPACE
+        self.assertEqual(installation.load_records_directory().parent, plugin_data)
 
     def test_we_declare_no_capability_we_would_have_to_be_granted(self):
         from hermes_cli.plugin_capabilities import VALID_CAPABILITY_IDS
