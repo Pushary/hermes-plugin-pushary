@@ -185,7 +185,7 @@ def report_plugin_active(session_id):
         return False
 
 
-def agent_event(event, session_id, can_drain=False):
+def agent_event(event, session_id, can_drain=False, error=None):
     """Report a Hermes session and pick up a queued notch instruction."""
     try:
         pending = _read_pending(session_id) if can_drain else None
@@ -197,6 +197,7 @@ def agent_event(event, session_id, can_drain=False):
             "canDrainCommand": can_drain and pending is None,
             "ackMode": can_drain and pending is None,
             "skipCommandDrain": pending is not None,
+            **({"error": error} if error else {}),
         })
         with urllib.request.urlopen(req, timeout=10) as resp:
             raw = resp.read().decode("utf-8")

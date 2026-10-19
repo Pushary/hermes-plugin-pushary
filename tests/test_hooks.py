@@ -72,7 +72,7 @@ class FakeRequest:
 
 
 def reset_state():
-    plugin._session_totals.update(tools=0, errors=0, notified=0)
+    plugin._session_totals.update(tools=0, errors=0)
     plugin._last_turn.update(completed=False, interrupted=False)
     plugin._plugin_activity.update(attempted=True)
     identity.forget_session()
@@ -453,6 +453,17 @@ class SessionLifecycleTest(unittest.TestCase):
         self.assertIn("3 tool calls", notify.call_args.kwargs["body"])
         self.assertEqual(notify.call_args.kwargs["context"]["type"], "task_complete")
 
+    def test_the_session_summary_still_counts_failed_tools(self):
+        with mock.patch.object(api, "send_notification") as notify:
+            plugin._on_session_start(session_id="s1")
+            plugin._on_post_tool_call("terminal", {}, "{}", 1, status="ok")
+            plugin._on_post_tool_call("terminal", {}, "x", 1, status="error", error_message="exit 1")
+            plugin._on_post_tool_call("read_file", {}, '{"error": "ENOENT"}', 1)
+            plugin._on_session_end(session_id="s1", completed=True)
+            plugin._on_session_finalize(session_id="s1")
+        notify.assert_called_once()
+        self.assertEqual(notify.call_args.kwargs["body"], "Session used 3 tool calls with 2 errors")
+
     def test_a_session_that_ran_no_tools_stays_quiet(self):
         with mock.patch.object(api, "send_notification") as notify:
             plugin._on_session_start(session_id="s1")
@@ -475,6 +486,70 @@ class SessionLifecycleTest(unittest.TestCase):
         self.assertIsNone(identity.session_id())
 
 
+class FailedTurnTest(unittest.TestCase):
+    def setUp(self):
+        reset_state()
+        os.environ["PUSHARY_API_KEY"] = "pk_test.sk_test"
+        self.addCleanup(os.environ.pop, "PUSHARY_API_KEY", None)
+        events = mock.patch.object(api, "agent_event", return_value={})
+        self.events = events.start()
+        self.addCleanup(events.stop)
+        notify = mock.patch.object(api, "send_notification", side_effect=AssertionError("must not push"))
+        notify.start()
+        self.addCleanup(notify.stop)
+        redact = mock.patch.object(plugin, "_redact_outbound_text", side_effect=lambda text: text.replace("sk-secret", "[redacted]"))
+        redact.start()
+        self.addCleanup(redact.stop)
+
+    def end_turn(self, **turn):
+        plugin._on_session_end(session_id="s1", task_id="t1", turn_id="u1", model="m", platform="cli", **turn)
+
+    def test_a_failed_turn_ends_the_turn_with_the_reason_it_stopped(self):
+        self.end_turn(completed=False, failed=True, interrupted=False,
+                      turn_exit_reason="all_retries_exhausted_no_response")
+        self.events.assert_called_once_with("session_end", "s1", can_drain=False,
+                                            error="all_retries_exhausted_no_response")
+
+    def test_the_reason_is_redacted_and_kept_short(self):
+        self.end_turn(completed=False, failed=True, interrupted=False,
+                      turn_exit_reason="repeated_outer_errors(401 sk-secret)" + "x" * 500)
+        error = self.events.call_args.kwargs["error"]
+        self.assertTrue(error.startswith("repeated_outer_errors(401 [redacted])"))
+        self.assertEqual(len(error), plugin.FAILED_TURN_REASON_MAX_LENGTH)
+
+    def test_a_reason_the_host_could_not_redact_is_never_sent(self):
+        with mock.patch.object(plugin, "_redact_outbound_text", return_value=plugin.REDACTION_UNAVAILABLE):
+            self.end_turn(completed=False, failed=True, interrupted=False,
+                          turn_exit_reason="repeated_outer_errors(401 sk-secret)")
+        self.events.assert_called_once_with("session_end", "s1", can_drain=False,
+                                            error=plugin.FAILED_TURN_WITHOUT_REASON)
+
+    def test_a_failed_turn_without_a_reason_still_carries_an_error(self):
+        self.end_turn(completed=False, failed=True, interrupted=False, turn_exit_reason="  ")
+        self.events.assert_called_once_with("session_end", "s1", can_drain=False,
+                                            error=plugin.FAILED_TURN_WITHOUT_REASON)
+
+    def test_completed_interrupted_and_flagless_turn_ends_carry_no_error(self):
+        for turn in (
+            {"completed": True, "failed": False, "interrupted": False, "turn_exit_reason": "text_response(stop)"},
+            {"completed": False, "failed": True, "interrupted": True, "turn_exit_reason": "interrupted"},
+            {"completed": False, "interrupted": False},
+        ):
+            with self.subTest(turn=turn):
+                self.events.reset_mock()
+                self.end_turn(**turn)
+                self.events.assert_called_once_with("session_end", "s1", can_drain=False, error=None)
+
+    def test_without_an_api_key_a_failed_turn_reports_nothing(self):
+        os.environ.pop("PUSHARY_API_KEY")
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        with mock.patch.dict(os.environ, {"PUSHARY_CONFIG_FILE": os.path.join(directory.name, "absent.json")}):
+            self.end_turn(completed=False, failed=True, interrupted=False,
+                          turn_exit_reason="repeated_outer_errors")
+        self.events.assert_not_called()
+
+
 class SessionCommandTest(unittest.TestCase):
     def setUp(self):
         reset_state()
@@ -489,12 +564,12 @@ class SessionCommandTest(unittest.TestCase):
     def test_turn_end_reports_idle_before_session_teardown(self):
         with mock.patch.object(api, "agent_event", return_value={}) as report:
             plugin._on_session_end(session_id="s1", completed=True)
-        report.assert_called_once_with("session_end", "s1", can_drain=False)
+        report.assert_called_once_with("session_end", "s1", can_drain=False, error=None)
 
     def test_session_start_advertises_the_command_consumer(self):
         with mock.patch.object(api, "agent_event", return_value={}) as report:
             plugin._on_session_start(session_id="s1")
-        report.assert_called_once_with("session_start", "s1", can_drain=True)
+        report.assert_called_once_with("session_start", "s1", can_drain=True, error=None)
 
     def test_a_notch_instruction_is_injected_into_the_next_turn(self):
         with mock.patch.object(
@@ -525,6 +600,18 @@ class SessionCommandTest(unittest.TestCase):
         self.assertEqual(ack["sessionId"], "s1")
         self.assertEqual(ack["machineId"], identity.machine_id())
 
+    def test_agent_event_sends_an_error_only_for_a_turn_that_failed(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b"{}"
+        with mock.patch.dict(os.environ, {"PUSHARY_API_KEY": "pk_test.sk_test"}), \
+                mock.patch.object(api.urllib.request, "urlopen", return_value=response) as send:
+            api.agent_event("session_end", "s1", error="repeated_outer_errors")
+            api.agent_event("session_end", "s1", error=None)
+        failed, finished = (json.loads(call.args[0].data.decode("utf-8")) for call in send.call_args_list)
+        self.assertEqual(failed["event"], "session_end")
+        self.assertEqual(failed["error"], "repeated_outer_errors")
+        self.assertNotIn("error", finished)
+
     def test_agent_event_waits_for_a_failed_ack_without_reinjecting(self):
         response = mock.MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps({
@@ -550,7 +637,7 @@ class SessionCommandTest(unittest.TestCase):
         with mock.patch.object(api, "agent_event", return_value={}) as report:
             plugin._on_session_start(session_id="s1")
             plugin._on_session_finalize(session_id="s1")
-        self.assertEqual(report.call_args_list[-1], mock.call("session_closed", "s1", can_drain=False))
+        self.assertEqual(report.call_args_list[-1], mock.call("session_closed", "s1", can_drain=False, error=None))
 
 
 class SharedKeyTest(unittest.TestCase):
@@ -567,33 +654,37 @@ class PostToolCallTest(unittest.TestCase):
         os.environ["PUSHARY_API_KEY"] = "pk_test.sk_test"
         self.addCleanup(os.environ.pop, "PUSHARY_API_KEY", None)
 
-    def test_uses_the_hosts_status_for_a_failure_that_is_not_json(self):
-        with mock.patch.object(api, "send_notification") as notify, \
-                mock.patch.object(plugin, "_redact_outbound_text", side_effect=str):
+    def test_a_command_that_exits_non_zero_is_counted_and_never_pushed(self):
+        with mock.patch.object(api, "send_notification") as notify:
             plugin._on_post_tool_call(
-                "terminal", {}, "bash: no such file", 12,
+                "terminal", {}, '{"output": "", "exit_code": 1, "error": null}', 12,
                 status="error", error_message="exit 1",
             )
-        notify.assert_called_once()
-        self.assertIn("exit 1", notify.call_args.kwargs["body"])
-
-    def test_a_host_reported_success_is_never_reported_as_an_error(self):
-        with mock.patch.object(api, "send_notification") as notify:
-            plugin._on_post_tool_call("terminal", {}, '{"error": null}', 1, status="ok")
         notify.assert_not_called()
+        self.assertEqual(plugin._session_totals, {"tools": 1, "errors": 1})
 
-    def test_falls_back_to_parsing_when_the_host_sends_no_status(self):
+    def test_a_failure_found_by_parsing_is_counted_and_never_pushed(self):
         with mock.patch.object(api, "send_notification") as notify:
             plugin._on_post_tool_call("read_file", {}, '{"error": "ENOENT"}', 3)
-        notify.assert_called_once()
+        notify.assert_not_called()
+        self.assertEqual(plugin._session_totals["errors"], 1)
 
-    def test_caps_error_pushes_but_keeps_counting(self):
-        with mock.patch.object(api, "send_notification") as notify:
-            for index in range(6):
-                plugin._on_post_tool_call("terminal", {}, "x", 1, status="error",
-                                          error_message=f"boom {index}")
-        self.assertEqual(notify.call_count, plugin.MAX_ERROR_NOTIFICATIONS)
-        self.assertEqual(plugin._session_totals["errors"], 6)
+    def test_a_host_reported_success_is_never_counted_as_an_error(self):
+        plugin._on_post_tool_call("terminal", {}, '{"error": "stale"}', 1, status="ok")
+        self.assertEqual(plugin._session_totals, {"tools": 1, "errors": 0})
+
+    def test_output_that_is_not_json_is_not_an_error_without_a_host_status(self):
+        plugin._on_post_tool_call("terminal", {}, "bash: no such file", 1)
+        self.assertEqual(plugin._session_totals, {"tools": 1, "errors": 0})
+
+    def test_failures_across_many_short_sessions_send_nothing(self):
+        with mock.patch.object(api, "send_notification") as notify, \
+                mock.patch.object(api, "agent_event", return_value={}):
+            for index in range(50):
+                plugin._on_session_start(session_id=f"cron_job_{index}")
+                for _ in range(4):
+                    plugin._on_post_tool_call("terminal", {}, "x", 1, status="error", error_message="exit 5")
+        notify.assert_not_called()
 
     def test_counts_tools_without_an_api_key_and_sends_nothing(self):
         os.environ.pop("PUSHARY_API_KEY")
@@ -606,7 +697,7 @@ class OutboundRedactionTest(unittest.TestCase):
     def setUp(self):
         reset_state()
 
-    def test_gate_and_error_egress_force_host_redaction_before_truncation(self):
+    def test_gate_egress_forces_host_redaction_before_truncation(self):
         secret = "sk-" + "s" * 300
         redactor = types.ModuleType("agent.redact")
         redactor.redact_sensitive_text = mock.Mock(
@@ -617,8 +708,7 @@ class OutboundRedactionTest(unittest.TestCase):
         with mock.patch.dict("sys.modules", {"agent": types.ModuleType("agent"), "agent.redact": redactor}), \
                 mock.patch.dict(os.environ, env), \
                 mock.patch.object(host, "_config", return_value={}), \
-                mock.patch.object(tools, "pushary_ask", return_value=json.dumps({"correlationId": "c1", "answered": True, "value": "yes"})) as ask, \
-                mock.patch.object(api, "send_notification") as notify:
+                mock.patch.object(tools, "pushary_ask", return_value=json.dumps({"correlationId": "c1", "answered": True, "value": "yes"})) as ask:
             args = {"command": secret + " command"}
             self.assertIsNone(plugin._on_pre_tool_call("terminal", args))
             outbound = ask.call_args.args[0]
@@ -628,11 +718,6 @@ class OutboundRedactionTest(unittest.TestCase):
             message = plugin._escalate_to_host_gate("terminal", args)["message"]
             self.assertIn("[redacted]", message)
             self.assertNotIn(secret[:100], message)
-            plugin._on_post_tool_call("terminal", {}, None, status="error", error_message=secret)
-            payload = notify.call_args.kwargs
-            self.assertIn("[redacted]", payload["body"])
-            self.assertIn("[redacted]", payload["context"]["errorMessage"])
-            self.assertNotIn(secret[:100], json.dumps(payload))
         self.assertTrue(redactor.redact_sensitive_text.called)
         for call in redactor.redact_sensitive_text.call_args_list:
             self.assertIs(call.kwargs["force"], True)
@@ -675,17 +760,20 @@ class DecisionFieldTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             api._with_decision_fields({}, {"tool_name": "terminal"}, api.IDENTITY_PARAM_NAMES)
 
-    def test_error_notifications_send_only_what_send_notification_accepts(self):
-        os.environ["PUSHARY_API_KEY"] = "pk_test.sk_test"
-        self.addCleanup(os.environ.pop, "PUSHARY_API_KEY", None)
+    def test_session_notifications_send_only_what_send_notification_accepts(self):
+        env = {"PUSHARY_API_KEY": "pk_test.sk_test", "PUSHARY_AUTO_NOTIFY_SESSION_END": "1"}
         captured = {}
 
         def fake_notify(title, body, **kwargs):
             captured.update(kwargs)
             return {"sent": 1}
 
-        with mock.patch.object(api, "send_notification", fake_notify):
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(api, "agent_event", return_value={}), \
+                mock.patch.object(api, "send_notification", fake_notify):
             plugin._on_post_tool_call("terminal", {}, "x", 1, status="error", error_message="boom")
+            plugin._on_session_finalize(session_id="s1")
+        self.assertTrue(captured)
         self.assertEqual(
             set(captured) - {"agent_name", "context"},
             set(),

@@ -50,7 +50,7 @@ from its own virtualenv. There, you can install the package with that
 virtualenv's Python and add `pushary` to `plugins.enabled`:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.8.0
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.8.1
 ```
 
 ## Setup
@@ -70,7 +70,8 @@ setup and the Mac app keep it.
   on every turn, with a machine id. The questions you send. The approvals Hermes
   routes to Pushary, which carry the command (up to 4,000 characters) and its
   description after Hermes has redacted secrets from both. Gated tool arguments
-  and at most three tool errors per session, redacted by Hermes first.
+  redacted by Hermes first. When Hermes marks a turn as failed, the reason it
+  stopped, redacted the same way.
 - **Machine id.** `~/.pushary/machine-id` when it exists, so Hermes and your
   other agents count as one machine. Otherwise a hash of the hostname.
 - **Files.** Messages queued in the Pushary app wait in
@@ -169,11 +170,13 @@ whole tool name, covering its future calls with different arguments. Choose
 
 ## Auto-notifications
 
-Errors returned by any tool are pushed automatically, capped at three per
-session. Set `PUSHARY_AUTO_NOTIFY_SESSION_END=1` to also get one notification
+Each turn end is reported to Pushary. When Hermes marks a turn as failed, the
+report carries the reason, and the push for that turn says the run failed
+instead of that it finished. Tool calls that fail along the way are counted, not
+pushed. Set `PUSHARY_AUTO_NOTIFY_SESSION_END=1` to also get one notification
 when a session finishes, with its tool and error counts.
 
-Gated argument summaries, targets and error text use Hermes's forced secret
+Gated argument summaries, targets and the reason a turn failed use Hermes's forced secret
 redaction before truncation or transmission to pushary.com. If the host
 redactor is unavailable or fails, the detail is omitted.
 

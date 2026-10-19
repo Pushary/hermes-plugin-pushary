@@ -8,7 +8,9 @@ from . import api, approval, host, identity, installation, schemas, tools
 
 logger = logging.getLogger(__name__)
 
-MAX_ERROR_NOTIFICATIONS = 3
+FAILED_TURN_WITHOUT_REASON = "no reason given"
+REDACTION_UNAVAILABLE = "[redaction unavailable]"
+FAILED_TURN_REASON_MAX_LENGTH = 200
 SYSTEM_PROMPT_SECTION_ID = "pushary.reach-the-human"
 HERMES_QUESTION_TOOL = "clarify"
 QUESTION_ROUTING_PROMPT = (
@@ -56,7 +58,7 @@ TOOL_REGISTRATIONS = (
      "Ask one of your own end-users and block on a fail-closed answer (Partner plan)"),
 )
 
-_session_totals = {"tools": 0, "errors": 0, "notified": 0}
+_session_totals = {"tools": 0, "errors": 0}
 _last_turn = {"completed": False, "interrupted": False}
 _plugin_activity = {"attempted": False}
 _plugin_activity_lock = threading.Lock()
@@ -147,7 +149,7 @@ def _redact_outbound_text(text: str) -> str:
         return redact_for_egress(redacted) if redact_for_egress else redacted
     except Exception:
         logger.warning("[pushary] host redaction unavailable; omitting outbound detail")
-        return "[redaction unavailable]"
+        return REDACTION_UNAVAILABLE
 
 
 def _summarize_args(args):
@@ -286,52 +288,25 @@ def _on_pre_tool_call(tool_name=None, args=None, session_id=None, **kwargs):
         return _block_unapproved(tool_name)
 
 
-def _tool_failure(result, status, error_message):
+def _tool_failed(result, status):
     if status is not None:
-        return (error_message or "tool returned an error") if status == "error" else None
+        return status == "error"
     try:
         parsed = json.loads(result) if isinstance(result, str) else result
     except (json.JSONDecodeError, TypeError):
-        return None
-    if isinstance(parsed, dict) and parsed.get("error"):
-        return str(parsed["error"])
-    return None
+        return False
+    return isinstance(parsed, dict) and bool(parsed.get("error"))
 
 
-def _on_post_tool_call(tool_name, args, result, duration_ms=0, status=None,
-                       error_message=None, **kwargs):
+def _on_post_tool_call(tool_name, args, result, duration_ms=0, status=None, **kwargs):
     _session_totals["tools"] += 1
-
-    failure = _tool_failure(result, status, error_message)
-    if failure is None:
-        return
-
-    _session_totals["errors"] += 1
-    if not api.is_configured():
-        return
-    if _session_totals["notified"] >= MAX_ERROR_NOTIFICATIONS:
-        return
-    _session_totals["notified"] += 1
-
-    try:
-        failure = _redact_outbound_text(str(failure))
-        api.send_notification(
-            title="Tool error in Hermes",
-            body=f"{tool_name} failed: {failure[:150]}",
-            agent_name=identity.agent_name(),
-            context={
-                "type": "error",
-                "errorMessage": failure[:500],
-                "summary": f"Tool '{tool_name}' returned an error after {duration_ms}ms",
-            },
-        )
-    except Exception:
-        pass
+    if _tool_failed(result, status):
+        _session_totals["errors"] += 1
 
 
 def _on_session_start(session_id=None, **kwargs):
     identity.remember_session(session_id)
-    _session_totals.update(tools=0, errors=0, notified=0)
+    _session_totals.update(tools=0, errors=0)
     _last_turn.update(completed=False, interrupted=False)
     _report_session_event("session_start", session_id, can_drain=True)
     _report_plugin_active_once(session_id)
@@ -371,26 +346,40 @@ def _on_pre_llm_call(session_id=None, **kwargs):
     }
 
 
-def _report_session_event(event, session_id, can_drain=False):
+def _report_session_event(event, session_id, can_drain=False, error=None):
     if not api.is_configured() or not session_id:
         return
     try:
-        api.agent_event(event, session_id, can_drain=can_drain)
+        api.agent_event(event, session_id, can_drain=can_drain, error=error)
     except Exception:
         pass
 
 
-def _on_session_end(session_id=None, completed=False, interrupted=False, **kwargs):
+def _turn_failure_reason(failed, interrupted, turn_exit_reason):
+    if failed is not True or interrupted:
+        return None
+    reason = _redact_outbound_text(str(turn_exit_reason or "").strip())
+    if not reason or reason == REDACTION_UNAVAILABLE:
+        return FAILED_TURN_WITHOUT_REASON
+    return reason[:FAILED_TURN_REASON_MAX_LENGTH]
+
+
+def _on_session_end(session_id=None, completed=False, interrupted=False, failed=False,
+                    turn_exit_reason=None, **kwargs):
     identity.remember_session(session_id)
     _last_turn.update(completed=bool(completed), interrupted=bool(interrupted))
-    _report_session_event("session_end", session_id or identity.session_id())
+    _report_session_event(
+        "session_end",
+        session_id or identity.session_id(),
+        error=_turn_failure_reason(failed, interrupted, turn_exit_reason),
+    )
 
 
 def _on_session_finalize(session_id=None, **kwargs):
     _report_session_event("session_closed", session_id or identity.session_id())
     tool_count = _session_totals["tools"]
     error_count = _session_totals["errors"]
-    _session_totals.update(tools=0, errors=0, notified=0)
+    _session_totals.update(tools=0, errors=0)
 
     if not os.environ.get("PUSHARY_AUTO_NOTIFY_SESSION_END"):
         identity.forget_session()
