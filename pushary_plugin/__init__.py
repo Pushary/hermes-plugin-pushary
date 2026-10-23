@@ -4,7 +4,7 @@ import os
 import threading
 from pathlib import Path
 
-from . import api, approval, host, identity, installation, schemas, tools
+from . import api, approval, history, host, identity, installation, schemas, tools
 
 logger = logging.getLogger(__name__)
 
@@ -306,6 +306,7 @@ def _on_post_tool_call(tool_name, args, result, duration_ms=0, status=None, **kw
 
 def _on_session_start(session_id=None, **kwargs):
     identity.remember_session(session_id)
+    history.start_history(session_id, kwargs.get("parent_session_id"))
     _session_totals.update(tools=0, errors=0)
     _last_turn.update(completed=False, interrupted=False)
     _report_session_event("session_start", session_id, can_drain=True)
@@ -332,6 +333,7 @@ def _report_plugin_active_once(session_id):
 
 def _on_pre_llm_call(session_id=None, **kwargs):
     identity.remember_session(session_id)
+    history.start_history(session_id, kwargs.get("parent_session_id"))
     if not api.is_configured() or not identity.session_id():
         return None
     result = api.agent_event("user_prompt", identity.session_id(), can_drain=True)
@@ -376,6 +378,7 @@ def _on_session_end(session_id=None, completed=False, interrupted=False, failed=
 
 
 def _on_session_finalize(session_id=None, **kwargs):
+    history.stop_history(session_id or identity.session_id())
     _report_session_event("session_closed", session_id or identity.session_id())
     tool_count = _session_totals["tools"]
     error_count = _session_totals["errors"]

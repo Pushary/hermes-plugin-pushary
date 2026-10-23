@@ -50,7 +50,7 @@ from its own virtualenv. There, you can install the package with that
 virtualenv's Python and add `pushary` to `plugins.enabled`:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.8.1
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.9.0
 ```
 
 ## Setup
@@ -231,3 +231,25 @@ Host contract tests skip when Hermes is not installed. Run them in the Hermes en
 ## Customer answers and routing
 
 Personal tools reach the operator on their configured phone, Mac or browser. Partner tools target a customer by `external_id`; they do not create a customer inbox in the Mac app. For `pushary_ask_end_user`, read `answered` and `value` for choice/text results. `approved` is true only for an answered affirmative confirm; a choice or text containing “yes” does not authorize an action. Polling waits and notification routes follow server policy; never interpret silence as consent.
+
+## Encrypted conversation history
+
+Version 0.9.0 exports the session's visible conversation through Hermes's read-only
+`SessionDB` API, including compacted ancestors and tool results. Rewound messages
+are removed from the phone timeline. Separate reasoning and hidden/model-only
+messages are excluded. The source contract is checked against Hermes v0.22.4;
+older incompatible schemas report an unavailable source instead of guessing.
+
+History requires a paired phone, history enabled, and an installed Pushary Mac
+helper or `pushary-transcript-register` CLI with export authorization support.
+Upgrade the helper alongside the plugin; older helpers cannot authorize local
+exports. Reload the plugin once after upgrading
+an already-running Hermes process. Starting a session or its next prompt starts
+capture; this does not wake an idle agent. A profile/account change or opting out
+stops the exporter. Remote agents need the collector in their own environment.
+
+A bounded, owner-only local snapshot feeds Pushary's existing redaction and
+end-to-end encryption path. The snapshot limit is 5,000 source rows / 20 MB;
+over-limit, unreadable or unsupported sources report a failure and preserve the
+history already saved on the phone. Snapshots are retried across uploader
+restarts, and new capture epochs preserve the user's backfill choice.
