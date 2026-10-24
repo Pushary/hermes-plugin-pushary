@@ -14,6 +14,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 from . import api
 
@@ -21,8 +22,26 @@ logger = logging.getLogger(__name__)
 MAX_MESSAGES = 5000
 MAX_SOURCE_BYTES = 20_000_000
 POLL_SECONDS = 5
+SNAPSHOT_REFRESH_SECONDS = 60
+AUTHORIZATION_LIFETIME_SECONDS = 60
+SNAPSHOT_RETENTION_SECONDS = 48 * 60 * 60
+SNAPSHOT_PRUNE_INTERVAL_SECONDS = 60 * 60
+SOURCE_UNAVAILABLE = "source_unavailable"
+HISTORY_NOT_ALLOWED_WARNING = ("[pushary] Hermes session history is not saved on this computer; it needs "
+                               "`npx pushary@latest setup` with the key Hermes uses, or Session history turned on in the Pushary Mac app")
+
+
+class _Authorization(NamedTuple):
+    inputs: tuple[object, ...]
+    expires_at: float
+    command: list[str] | None
+
+
 _workers: dict[tuple[str, str], tuple[threading.Event, threading.Thread]] = {}
+_authorizations: dict[str, _Authorization] = {}
 _lock = threading.Lock()
+_next_prune_at = 0.0
+_history_not_allowed_reported = False
 
 
 def _text_blocks(content: object) -> list[dict[str, object]]:
@@ -151,8 +170,7 @@ def _registration_command(key: str) -> list[str] | None:
             command = [helper, "hermes"]
         result = subprocess.run([helper, "authorize-export"],
                                 input=json.dumps({"apiKey": key, "baseUrl": api.BASE_URL}), text=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5, check=False,
-                                env={**os.environ, "PUSHARY_API_KEY": key, "PUSHARY_BASE_URL": api.BASE_URL})
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5, check=False)
         if result.returncode != 0:
             return None
         authorization = json.loads(result.stdout)
@@ -163,27 +181,146 @@ def _registration_command(key: str) -> list[str] | None:
         return None
 
 
+def _file_state(path: Path | None) -> tuple[int, ...] | None:
+    if path is None:
+        return None
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return None
+    return (info.st_ino, info.st_mode, info.st_nlink, info.st_uid, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _authorization_inputs(key: str) -> tuple[object, ...]:
+    root = Path.home() / ".pushary"
+    helper = shutil.which("pushary-transcript-register")
+    sources = (root / "native-transcript-consent.json", root / "bridge-auth", root / "bridge-auth" / "agent-key.json",
+               root / "machine-id", root / "bin" / "pushary-bridge", api.pushary_config_path(),
+               Path(helper) if helper else None)
+    return (key, api.BASE_URL, os.environ.get("PUSHARY_TRANSCRIPTS"), helper, *(_file_state(source) for source in sources))
+
+
+def _authorized_command(key: str) -> list[str] | None:
+    inputs = _authorization_inputs(key)
+    now = time.monotonic()
+    with _lock:
+        cached = _authorizations.get(key)
+    if cached is not None and cached.inputs == inputs and now < cached.expires_at:
+        return cached.command
+    command = _registration_command(key)
+    with _lock:
+        _authorizations[key] = _Authorization(inputs, now + AUTHORIZATION_LIFETIME_SECONDS, command)
+    return command
+
+
+def _report_history_not_allowed_once() -> None:
+    global _history_not_allowed_reported
+    with _lock:
+        if _history_not_allowed_reported:
+            return
+        _history_not_allowed_reported = True
+    logger.warning(HISTORY_NOT_ALLOWED_WARNING)
+
+
+def _history_root() -> Path:
+    return Path.home() / ".pushary" / "hermes-history"
+
+
+def _snapshot_expired(path: Path, now: float) -> bool:
+    return now - path.lstat().st_mtime > SNAPSHOT_RETENTION_SECONDS
+
+
+def _prune_expired_snapshots(root: Path, now: float) -> None:
+    try:
+        bindings = [entry for entry in root.iterdir() if not entry.is_symlink() and entry.is_dir()]
+    except OSError:
+        return
+    for binding in bindings:
+        try:
+            snapshots = list(binding.iterdir())
+        except OSError:
+            continue
+        for snapshot in snapshots:
+            try:
+                if _snapshot_expired(snapshot, now):
+                    snapshot.unlink()
+            except OSError:
+                continue
+
+
+def _prune_expired_snapshots_periodically() -> None:
+    global _next_prune_at
+    now = time.monotonic()
+    with _lock:
+        if now < _next_prune_at:
+            return
+        _next_prune_at = now + SNAPSHOT_PRUNE_INTERVAL_SECONDS
+    _prune_expired_snapshots(_history_root(), time.time())
+
+
+def _source_state(database_path: Path) -> tuple[object, ...]:
+    return (_file_state(database_path), _file_state(database_path.with_name(database_path.name + "-wal")))
+
+
+def _snapshot_refresh_due(written_at: float | None, now: float) -> bool:
+    return written_at is None or not 0 <= now - written_at < SNAPSHOT_REFRESH_SECONDS
+
+
+def _is_permanent_source_failure(failure: Exception) -> bool:
+    return isinstance(failure, ValueError)
+
+
+def _snapshot_digest(messages: list[dict[str, object]], error: str | None, completed: bool) -> str:
+    encoded = json.dumps([messages, error, completed], ensure_ascii=True, allow_nan=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _write_changed_snapshot(path: Path, session_id: str, messages: list[dict[str, object]], error: str | None,
+                            completed: bool, written: str | None, refresh_due: bool) -> str | None:
+    digest = _snapshot_digest(messages, error, completed)
+    if not refresh_due and digest == written:
+        return None
+    write_snapshot(path, session_id, messages, error=error, completed=completed)
+    return digest
+
+
 def _export_loop(database_path: Path, session_id: str, key: str, command: list[str], stop: threading.Event) -> None:
     binding = hashlib.sha256((api.BASE_URL.rstrip("/") + "\0" + key + "\0" + str(database_path)).encode()).hexdigest()
-    path = Path.home() / ".pushary" / "hermes-history" / binding / f"{session_id}.json"
+    path = _history_root() / binding / f"{session_id}.json"
     next_registration = 0
+    written_at = None
+    source_state = None
+    written = None
     warned = False
     revoked = False
     try:
         while True:
-            if api._get_api_key() != key or _registration_command(key) != command:
+            if api._get_api_key() != key or _authorized_command(key) != command:
                 revoked = True
                 break
             ending = stop.is_set()
-            try:
-                messages = read_display_history(database_path, session_id)
-                write_snapshot(path, session_id, messages, completed=ending)
-                warned = False
-            except Exception:
-                if not warned:
+            now = time.time()
+            refresh_due = ending or _snapshot_refresh_due(written_at, now)
+            current_state = _source_state(database_path)
+            if refresh_due or current_state != source_state:
+                source_state = current_state
+                error = None
+                try:
+                    messages = read_display_history(database_path, session_id)
+                except Exception as failure:
+                    messages, error = [], SOURCE_UNAVAILABLE
+                    if not _is_permanent_source_failure(failure):
+                        source_state = None
+                try:
+                    digest = _write_changed_snapshot(path, session_id, messages, error, ending and error is None, written, refresh_due)
+                except ValueError:
+                    messages, error = [], SOURCE_UNAVAILABLE
+                    digest = _write_changed_snapshot(path, session_id, messages, error, False, written, refresh_due)
+                if digest is not None:
+                    written, written_at = digest, now
+                if error is not None and not warned:
                     logger.warning("[pushary] Hermes history source is unavailable; existing phone history is preserved")
-                warned = True
-                write_snapshot(path, session_id, [], error="source_unavailable")
+                warned = error is not None
             if ending or time.monotonic() >= next_registration:
                 payload = {"session_id": session_id, "cwd": str(database_path.parent), "transcript_path": str(path),
                            "hook_event_name": "SessionEnd" if ending else "SessionStart"}
@@ -211,16 +348,18 @@ def start_history(session_id: object, parent_session_id: object = None) -> None:
     try:
         from hermes_constants import get_hermes_home
 
-        key = api._get_api_key()
-        command = _registration_command(key)
-        if command is None:
-            return
+        _prune_expired_snapshots_periodically()
         database_path = (get_hermes_home() / "state.db").resolve()
         identity = (str(database_path), session_id)
         with _lock:
             if identity in _workers or len(_workers) >= 32:
                 return
-            stop = threading.Event()
+        key = api._get_api_key()
+        command = _authorized_command(key)
+        if command is None:
+            _report_history_not_allowed_once()
+            return
+        stop = threading.Event()
         context = contextvars.copy_context()
         thread = threading.Thread(target=context.run, args=(_export_loop, database_path, session_id, key, command, stop),
                                   name="pushary-history", daemon=True)

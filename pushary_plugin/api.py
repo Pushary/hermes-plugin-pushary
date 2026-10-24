@@ -129,11 +129,14 @@ def _configured_key():
     return _key_in_pushary_config()
 
 
+def pushary_config_path():
+    configured = os.environ.get("PUSHARY_CONFIG_FILE")
+    return Path(configured).expanduser() if configured else Path.home() / ".pushary" / "config.json"
+
+
 def _key_in_pushary_config():
-    path = Path(os.environ.get("PUSHARY_CONFIG_FILE", "")).expanduser() \
-        if os.environ.get("PUSHARY_CONFIG_FILE") else Path.home() / ".pushary" / "config.json"
     try:
-        value = json.loads(path.read_text(encoding="utf-8")).get("apiKey")
+        value = json.loads(pushary_config_path().read_text(encoding="utf-8")).get("apiKey")
         return value if isinstance(value, str) and value else None
     except Exception:
         return None

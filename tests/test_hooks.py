@@ -9,16 +9,21 @@ from pathlib import Path
 from unittest import mock
 
 import pushary_plugin as plugin
-from pushary_plugin import api, approval, host, identity, installation, tools
+from pushary_plugin import api, approval, history, host, identity, installation, tools
 
 SANDBOX_HERMES_HOME = tempfile.TemporaryDirectory(prefix="pushary-hermes-home-")
 
 
+SANDBOX_HISTORY = mock.patch.object(history, "_history_root", return_value=Path(SANDBOX_HERMES_HOME.name) / "hermes-history")
+
+
 def setUpModule():
     os.environ["HERMES_HOME"] = SANDBOX_HERMES_HOME.name
+    SANDBOX_HISTORY.start()
 
 
 def tearDownModule():
+    SANDBOX_HISTORY.stop()
     os.environ.pop("HERMES_HOME", None)
     SANDBOX_HERMES_HOME.cleanup()
 

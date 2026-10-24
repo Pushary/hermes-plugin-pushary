@@ -1,5 +1,5 @@
 name: pushary
-version: 0.9.0
+version: 0.9.1
 description: Push notifications and human-in-the-loop for Hermes Agent via Pushary
 author: RalphNex OU
 requires_env:

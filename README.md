@@ -50,7 +50,7 @@ from its own virtualenv. There, you can install the package with that
 virtualenv's Python and add `pushary` to `plugins.enabled`:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.9.0
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.9.1
 ```
 
 ## Setup
@@ -247,9 +247,26 @@ exports. Reload the plugin once after upgrading
 an already-running Hermes process. Starting a session or its next prompt starts
 capture; this does not wake an idle agent. A profile/account change or opting out
 stops the exporter. Remote agents need the collector in their own environment.
+With the CLI, the Hermes key must be the key saved in `~/.pushary/config.json`.
+The CLI's export check reads the server from the same `PUSHARY_BASE_URL` as the
+plugin, so it cannot catch a server mismatch. The CLI's uploader sends only
+sessions registered with its own key and server: if Hermes uses another server,
+the snapshot is written on this computer but never uploaded. When this computer
+does not allow history, the plugin logs one warning per Hermes process.
 
 A bounded, owner-only local snapshot feeds Pushary's existing redaction and
 end-to-end encryption path. The snapshot limit is 5,000 source rows / 20 MB;
 over-limit, unreadable or unsupported sources report a failure and preserve the
 history already saved on the phone. Snapshots are retried across uploader
 restarts, and new capture epochs preserve the user's backfill choice.
+
+The exporter reads the session again when Hermes's database changes, rewrites
+the snapshot only when the conversation changed, and refreshes it once a minute
+while the session runs, measured on the wall clock so a computer that wakes
+from sleep refreshes it on the next poll. A source that is too large or
+unsupported is read again only when the database changes or at that refresh;
+other read errors are retried on every poll. It asks the helper again when the
+account, consent or history setting files change, and at least once a minute.
+The Pushary plugin deletes snapshots in `~/.pushary/hermes-history` that have
+not changed for 48 hours. It checks when a session starts or gets a prompt, at
+most once an hour, including while history is off.
