@@ -38,7 +38,7 @@ PUSHARY_NOTIFY = {
             },
             "body": {
                 "type": "string",
-                "description": "Notification body (max 500 chars, aim for under 200)",
+                "description": "Notification body (max 500 chars; the phone shows the first 180)",
             },
             "agent_name": {
                 "type": "string",

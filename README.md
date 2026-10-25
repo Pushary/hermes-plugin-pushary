@@ -50,7 +50,7 @@ from its own virtualenv. There, you can install the package with that
 virtualenv's Python and add `pushary` to `plugins.enabled`:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.9.1
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.9.2
 ```
 
 ## Setup
@@ -230,7 +230,7 @@ Host contract tests skip when Hermes is not installed. Run them in the Hermes en
 
 ## Customer answers and routing
 
-Personal tools reach the operator on their configured phone, Mac or browser. Partner tools target a customer by `external_id`; they do not create a customer inbox in the Mac app. For `pushary_ask_end_user`, read `answered` and `value` for choice/text results. `approved` is true only for an answered affirmative confirm; a choice or text containing “yes” does not authorize an action. Polling waits and notification routes follow server policy; never interpret silence as consent.
+Personal tools reach the operator on their configured phone, Mac or browser. Partner tools target a customer by `external_id`; the customer answers on their enrolled phone, or on a Mac they connected from that phone. For `pushary_ask_end_user`, read `answered` and `value` for choice/text results. `approved` is true only for an answered affirmative confirm; a choice or text containing “yes” does not authorize an action. Polling waits and notification routes follow server policy; never interpret silence as consent.
 
 ## Encrypted conversation history
 

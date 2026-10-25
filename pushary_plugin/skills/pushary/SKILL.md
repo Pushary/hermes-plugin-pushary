@@ -1,6 +1,6 @@
 ---
 name: pushary-hermes
-version: 0.9.0
+version: 0.9.1
 description: Push notifications and human-in-the-loop for Hermes Agent. Use this whenever a running agent needs a human and no chat session is active, such as before an irreversible or destructive action, before spending money, deploying, force-pushing or deleting, when blocked on a decision outside your authority, when running unattended and you hit a genuine ambiguity, when another skill's workflow says to confirm with the user, and when a long task finishes or fails with nobody watching. Send alerts when tasks finish, ask questions (yes/no, multiple choice, or free text) via web push, and get answers from their connected devices. Use these tools proactively when the user is not actively in a chat session. Works alongside Hermes's built-in messaging platforms (Telegram, Discord, etc.) as a universal fallback channel.
 metadata:
   hermes:
@@ -65,13 +65,13 @@ Hermes denies by default when Pushary is unreachable. Only an operator who sets 
 | Surface | What the user can do |
 | --- | --- |
 | Mobile app | Answer confirm, select and input questions. Supported confirm notifications offer approve/deny actions on the lock screen; arbitrary choices and text open the app. |
-| Mac notch | Answer personal account questions with confirm, select, input and question-set controls, including keyboard controls. Presence and delivery policy determine when the phone is also reached. |
+| Mac notch | Answer confirm, select, input and question-set questions, including keyboard controls. Presence and delivery policy determine when the phone is also reached. |
 | Slack | Answer through buttons, menus or text modals when the integration and intended recipient are configured. |
 | Browser | Open the decision page as a fallback; browser notification delivery requires permission. |
 
 Personal setup connects the operator's devices. For a Mac, the operator installs from https://pushary.com/download, signs in to the same personal account and connects their agents in the app. Request one harmless test question and verify it reaches the intended surface. Test phone fallback while away from the Mac; do not infer delivery from a successful API call alone.
 
-Partner customers use scoped enrollment links issued by their application. Do not enroll them into the operator's account or send their decisions through personal tools. The Mac notch currently uses the personal account/session API; do not promise a Partner customer inbox on Mac. See https://pushary.com/docs/agents/embed for Partner setup.
+Partner customers use scoped enrollment links issued by their application. Do not enroll them into the operator's account or send their decisions through personal tools. They answer on their enrolled phone, and in the Mac notch once they connect the Mac from the phone app. See https://pushary.com/docs/agents/embed for Partner setup.
 
 ## Tools
 
@@ -79,7 +79,7 @@ Tool names below are the native plugin names. An MCP client without the plugin s
 
 ### pushary_remind
 
-For personal reminders later, use `pushary_remind` with `body` and `in_minutes`, or `at` with an explicit UTC offset. Never guess the timezone; confirm the returned time. Pushary saves it and delivers after Hermes exits. Use Hermes cron for future agent work. No arguments lists pending reminders; `cancel_reminder_id` cancels a scheduled one. One-time only, up to 30 days ahead, and delivery can be about a minute late. A connected phone is required. Do not use `pushary_ask` for reminders.
+For personal reminders later, use `pushary_remind` with `body` and `in_minutes`, or `at` with an explicit UTC offset. Never guess the timezone; confirm the returned time. Pushary saves it and delivers after Hermes exits. Use Hermes cron for future agent work. No arguments lists pending reminders; `cancel_reminder_id` cancels a scheduled one. One-time only, up to 30 days ahead, and delivery can be about a minute late. It goes to the phone and the Pushary Mac app; with no phone connected, only to the Mac app if they have one. Tell the user any `warning`. Do not use `pushary_ask` for reminders.
 
 ### pushary_notify
 
@@ -91,7 +91,7 @@ Send a one-way push notification. Optionally include structured context for a ri
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | title | string | Yes | Notification title (max 100 chars, aim for under 60) |
-| body | string | Yes | Notification body (max 500 chars, aim for under 200) |
+| body | string | Yes | Notification body (max 500 chars; the phone shows the first 180) |
 | agent_name | string | No | Identifies this Hermes instance (e.g., "Hermes - daily-briefing") |
 | context_type | "task_complete" / "error" / "info" | Yes for task updates | Marks the notification for task-update routing. |
 | summary | string | No | Short summary of the result. |
@@ -186,7 +186,7 @@ Returns `ratified: true` only on an explicit yes. Anything else means proceed as
 
 Read `answered`, `status` and `handoffAction` (falling back to `nextAction`) on every response. Only `pending` is live; expired, cancelled, missing and unavailable are not new timeouts. Keep waiting with the same correlationId while pending. A poll ending does not expire the question; never cancel just because a poll returned without an answer. Before moving a live question to the current chat, cancel it. If cancellation says `stop`, stop; if it loses a race, poll once for one second and honor the winning answer. Silence is never consent. A select or input value containing “yes” is answer data, not approval of a separate action.
 
-Delivery is controlled by the user's policy: `push_first` uses presence, `push_only` requests push every time, `notify_only` leaves the decision in the current client, and `terminal_only` avoids push. Do not override the mode or duplicate a question on every surface. The runtime owns delivery, expiry and settlement; do not claim that a reply can restart an ended agent turn.
+Delivery is controlled by the user's policy: `push_first` (When away) still sends your questions to the phone and lets only hook approvals skip it while the user is at the computer, `push_only` requests push every time, `notify_only` leaves the decision in the current client, and `terminal_only` avoids push. Do not override the mode or duplicate a question on every surface. The runtime owns delivery, expiry and settlement; do not claim that a reply can restart an ended agent turn.
 
 Each call returns an answer, a pending wait, or an explicit handoff:
 
@@ -226,6 +226,6 @@ Always pass `agent_name` so the user knows which Hermes profile or task is askin
 ## Notification Etiquette
 
 - **Titles under 60 characters.** Phone lock screens truncate aggressively.
-- **Bodies under 200 characters.** Use the flat `summary`, `details` and `next_steps` fields.
+- **Bodies under 180 characters,** where the phone cuts them. Use the flat `summary`, `details` and `next_steps` fields.
 - **Max 3 push notifications per task.** If the user is in an active chat, prefer that channel.
 - **Don't duplicate.** If you already sent the message via Telegram/Discord, send another push only if requested or needed for an unattended result.
