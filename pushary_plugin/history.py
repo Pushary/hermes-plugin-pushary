@@ -29,6 +29,11 @@ SNAPSHOT_PRUNE_INTERVAL_SECONDS = 60 * 60
 SOURCE_UNAVAILABLE = "source_unavailable"
 HISTORY_NOT_ALLOWED_WARNING = ("[pushary] Hermes session history is not saved on this computer; it needs "
                                "`npx pushary@latest setup` with the key Hermes uses, or Session history turned on in the Pushary Mac app")
+HELPER_ENVIRONMENT_NAMES = frozenset({
+    "HOME", "PATH", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
+    "SYSTEMROOT", "PATHEXT", "COMSPEC", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",
+    "PUSHARY_BASE_URL", "PUSHARY_API_URL", "PUSHARY_CONFIG_FILE", "PUSHARY_TRANSCRIPTS", "PUSHARY_TRANSCRIPT_REGISTRY_DIR",
+})
 
 
 class _Authorization(NamedTuple):
@@ -156,6 +161,14 @@ def write_snapshot(path: Path, session_id: str, messages: list[dict[str, object]
         Path(temporary).unlink(missing_ok=True)
 
 
+def _helper_environment() -> dict[str, str]:
+    return {name: value for name, value in os.environ.items() if name in HELPER_ENVIRONMENT_NAMES}
+
+
+def _registration_environment(key: str) -> dict[str, str]:
+    return {**_helper_environment(), "PUSHARY_API_KEY": key, "PUSHARY_BASE_URL": api.BASE_URL}
+
+
 def _registration_command(key: str) -> list[str] | None:
     root = Path.home() / ".pushary"
     try:
@@ -170,7 +183,7 @@ def _registration_command(key: str) -> list[str] | None:
             command = [helper, "hermes"]
         result = subprocess.run([helper, "authorize-export"],
                                 input=json.dumps({"apiKey": key, "baseUrl": api.BASE_URL}), text=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5, check=False)
+                                env=_helper_environment(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5, check=False)
         if result.returncode != 0:
             return None
         authorization = json.loads(result.stdout)
@@ -324,8 +337,7 @@ def _export_loop(database_path: Path, session_id: str, key: str, command: list[s
             if ending or time.monotonic() >= next_registration:
                 payload = {"session_id": session_id, "cwd": str(database_path.parent), "transcript_path": str(path),
                            "hook_event_name": "SessionEnd" if ending else "SessionStart"}
-                environment = {**os.environ, "PUSHARY_API_KEY": key, "PUSHARY_BASE_URL": api.BASE_URL}
-                result = subprocess.run(command, input=json.dumps(payload), text=True, env=environment,
+                result = subprocess.run(command, input=json.dumps(payload), text=True, env=_registration_environment(key),
                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=False)
                 if result.returncode != 0:
                     logger.warning("[pushary] Hermes history reader could not register")

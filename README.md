@@ -50,7 +50,7 @@ from its own virtualenv. There, you can install the package with that
 virtualenv's Python and add `pushary` to `plugins.enabled`:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.0
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.1
 ```
 
 ## Setup

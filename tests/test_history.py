@@ -431,6 +431,48 @@ class HistoryTests(unittest.TestCase):
                     helper.write_text("#!/bin/sh\nprintf '%s' " + shlex.quote(reply) + "\n")
                     self.assertIsNone(history._registration_command("profile-key"))
 
+    def test_the_history_helper_receives_only_the_environment_it_reads(self):
+        with tempfile.TemporaryDirectory() as directory:
+            calls = Path(directory) / "helper-calls.jsonl"
+            helper = Path(directory) / "pushary-transcript-register"
+            helper.write_text("\n".join([
+                "#!" + sys.executable,
+                "import json, os, sys",
+                "received = sys.stdin.read()",
+                f"with open({str(calls)!r}, 'a') as calls:",
+                "    calls.write(json.dumps({'argv': sys.argv[1:], 'environment': dict(os.environ), 'input': received}) + '\\n')",
+                "if sys.argv[1:] == ['authorize-export']:",
+                "    print(json.dumps({'version': 1, 'authorized': True}))",
+            ]) + "\n")
+            helper.chmod(0o700)
+            inherited = {"HOME": directory, "PATH": os.environ.get("PATH", os.defpath), "PUSHARY_TRANSCRIPTS": "1",
+                         "PUSHARY_CONFIG_FILE": str(Path(directory) / "config.json"), "PUSHARY_API_KEY": "shell-key",
+                         "OPENROUTER_API_KEY": "provider-secret", "ANTHROPIC_API_KEY": "provider-secret"}
+            stop = threading.Event()
+            stop.set()
+            with mock.patch.object(Path, "home", return_value=Path(directory)), \
+                    mock.patch.dict("os.environ", inherited, clear=True), \
+                    mock.patch.object(history.shutil, "which", return_value=str(helper)):
+                command = history._registration_command("profile-key")
+                self.assertEqual(command, [str(helper), "hermes"])
+                with mock.patch.object(history.api, "_get_api_key", return_value="profile-key"), \
+                        mock.patch.object(history, "_authorized_command", return_value=command), \
+                        mock.patch.object(history, "read_display_history", return_value=[]):
+                    history._export_loop(Path(directory) / "state.db", "session", "profile-key", command, stop)
+            authorization, registration = [json.loads(line) for line in calls.read_text().splitlines()]
+            needed = {"HOME": directory, "PATH": inherited["PATH"], "PUSHARY_TRANSCRIPTS": "1",
+                      "PUSHARY_CONFIG_FILE": inherited["PUSHARY_CONFIG_FILE"]}
+            withheld = {"OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"}
+            self.assertEqual(authorization["argv"], ["authorize-export"])
+            self.assertEqual(json.loads(authorization["input"])["apiKey"], "profile-key")
+            self.assertLessEqual(needed.items(), authorization["environment"].items())
+            self.assertFalse((withheld | {"PUSHARY_API_KEY"}) & authorization["environment"].keys(),
+                             "the key reaches the helper on stdin, never through its environment")
+            self.assertEqual(registration["argv"], ["hermes"])
+            self.assertLessEqual({**needed, "PUSHARY_API_KEY": "profile-key", "PUSHARY_BASE_URL": history.api.BASE_URL}.items(),
+                                 registration["environment"].items())
+            self.assertFalse(withheld & registration["environment"].keys())
+
     def test_revocation_stops_before_reading_or_exporting_local_history(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(Path, "home", return_value=Path(directory)), \
                 mock.patch.object(history.api, "_get_api_key", return_value="fixture"), \

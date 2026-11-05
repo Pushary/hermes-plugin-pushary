@@ -2,7 +2,7 @@
   "name": "pushary",
   "label": "Pushary",
   "description": "Approvals Pushary is carrying to your phone, answerable from Hermes Desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "tab": { "hidden": true },
   "entry": "web.js",
   "api": "plugin_api.py"
