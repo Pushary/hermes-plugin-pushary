@@ -1,0 +1,34 @@
+[
+  {
+    "outcome": "answered_here",
+    "version": 1
+  },
+  {
+    "outcome": "already_closed",
+    "version": 1
+  },
+  {
+    "outcome": "unreachable",
+    "version": 1
+  },
+  {
+    "outcome": "not_found",
+    "version": 1
+  },
+  {
+    "outcome": "not_waiting",
+    "version": 1
+  },
+  {
+    "outcome": "not_answerable_here",
+    "version": 1
+  },
+  {
+    "outcome": "not_offered",
+    "version": 1
+  },
+  {
+    "outcome": "already_claimed",
+    "version": 1
+  }
+]

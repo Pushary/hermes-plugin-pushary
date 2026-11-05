@@ -1,0 +1,45 @@
+{
+  "answerOutcomes": [
+    "answered_here",
+    "already_closed",
+    "unreachable",
+    "not_found",
+    "not_waiting",
+    "not_answerable_here",
+    "not_offered",
+    "already_claimed"
+  ],
+  "answerPathSuffix": "/answer",
+  "approvalChoices": [
+    "once",
+    "session",
+    "always",
+    "deny"
+  ],
+  "approvalsChangedWireEvent": "plugin.pushary.approvals.changed",
+  "approvalsPath": "/approvals",
+  "claimStates": [
+    "claiming",
+    "won",
+    "lost"
+  ],
+  "correlationIdPattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+  "hostFailureOutcomes": [
+    "transport_busy",
+    "transport_error",
+    "transport_interrupted",
+    "transport_invalid",
+    "transport_stale",
+    "transport_timeout"
+  ],
+  "recentOutcomes": [
+    "once",
+    "session",
+    "always",
+    "deny",
+    "handed_to_hermes",
+    "ended"
+  ],
+  "tokenPattern": "^[a-z][a-z0-9_]{0,63}$",
+  "version": 1
+}

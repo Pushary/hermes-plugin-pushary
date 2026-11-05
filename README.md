@@ -50,7 +50,7 @@ from its own virtualenv. There, you can install the package with that
 virtualenv's Python and add `pushary` to `plugins.enabled`:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==0.9.2
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.0
 ```
 
 ## Setup
@@ -77,7 +77,11 @@ setup and the Mac app keep it.
 - **Files.** Messages queued in the Pushary app wait in
   `~/.pushary/run/hermes-commands` until a turn picks them up. The plugin notes
   which Hermes process loaded it in `plugin-data/pushary/loaded/` in the Hermes
-  home.
+  home. Each approval it carries is recorded in
+  `plugin-data/pushary/approvals/`, readable only by you: the redacted command
+  Hermes showed, the choices it offered, and how it ended. Hermes Desktop lists
+  recent approvals from there. Records older than a day are removed the next
+  time Hermes asks for an approval, except one still waiting inside its timeout.
 - **Credentials.** `PUSHARY_API_KEY`, as described under Setup.
 - **Usage report.** Once each time Hermes starts, the plugin reports that it
   loaded, with the plugin and Hermes versions. A copy from Hermes's catalog, or
@@ -131,6 +135,51 @@ How long your phone has depends on your delivery mode. Under Every time
 (300 seconds by default), so an answer is still yours to give minutes after the
 notification lands. Under When I'm out (`push_first`), your phone has the push window,
 20 seconds unless you change it, and then Hermes' own prompt takes over.
+
+On a Pushary Team workspace, an approval route that enforces who answers ("Only
+they can answer") is never handed to Hermes' own prompt or answered in Hermes
+Desktop. The plugin waits for the route's approvers until Hermes' timeout, and
+denies if none of them answers.
+
+## Answering from Hermes Desktop
+
+Once Pushary is the approval transport, Hermes stops showing its own approval
+prompt. Hermes Desktop gets it back through this plugin's Desktop half: a
+**Pushary** chip in the status bar shows how many approvals are waiting on your
+phone, and its panel lists each one with the choices Hermes offered. Answer on
+the phone or in the panel, whichever is closer.
+
+Only one answer counts. Answering in the panel withdraws the question from
+Pushary first, and the panel's answer is used only when Pushary confirms that
+this withdrawal is the one that moved the question from waiting to withdrawn.
+If anything else closed it first, such as a phone answer, the agent being
+stopped, or the plugin's own withdrawal at Hermes' deadline, the panel says the
+approval had already closed and your answer was not used. If Pushary does not
+confirm, the answer is not used either, and the approval is never treated as
+allowed. The panel also lists the last few approvals: how each ended, and where
+it was answered when Pushary recorded that.
+
+The answer never passes through a file. The panel's backend runs inside Hermes,
+behind Hermes Desktop's session token, and hands your choice to the waiting
+approval in memory, so nothing the agent can write to disk can answer for you.
+That is also why the panel answers only approvals that this Hermes is carrying.
+One from a `hermes chat` in a terminal is listed without buttons, to answer on
+your phone.
+
+An approval a Team route sends to someone else is shown without buttons, with
+the name of whoever it is routed to. A Desktop answer is recorded in Pushary as
+withdrawn at the computer, the same way an answer in Claude Code's own terminal
+prompt is. It is not yet recorded as a named answer in the Team activity.
+
+To see it, enable **Pushary** under Capabilities, Plugins in Hermes Desktop.
+Hermes keeps the Desktop half off until you do. Your API key can be saved from
+the plugin's settings page there too.
+
+The panel source is `desktop-src/plugin.ts`, TypeScript compiled to
+`pushary_plugin/desktop/plugin.js` with no bundling. The backend it calls is
+`pushary_plugin/dashboard/plugin_api.py`. Both speak the versioned contract in
+`pushary_plugin/desktop_contract.py`. `desktop-src/contract-fixtures/` is what
+the Python side produces, and the TypeScript tests parse those same files.
 
 ## Per-tool gating (without the transport)
 
@@ -196,6 +245,30 @@ session receives its next prompt.
 PYTHONPATH=. python3 -m unittest discover -s tests
 ```
 
+The Desktop half, from the monorepo root:
+
+```bash
+node node_modules/typescript/bin/tsc -p packages/hermes-plugin/desktop-src/tsconfig.json
+(cd packages/hermes-plugin && bun test desktop-src/plugin.test.ts)
+node packages/hermes-plugin/scripts/build-desktop.mjs --check
+node packages/hermes-plugin/scripts/check-against-hermes.mjs
+```
+
+From this repository on its own, install the pinned tools first with
+`npm install --no-save --no-package-lock typescript@5.9.3 react@19.3.0 react-dom@19.3.0 @types/react@19.3.0 @types/react-dom@19.3.0`,
+then run the same commands from here with `desktop-src/tsconfig.json` and
+`scripts/`, as `.github/workflows/ci.yml` does.
+
+The last one checks the plugin against the Hermes Agent installed on this
+machine: it typechecks the panel against the Hermes Desktop SDK, then runs
+`tests/test_hermes_contract.py` and `tests/test_desktop_backend.py` with Hermes'
+own interpreter, where nothing may skip. It fails when Hermes is not installed;
+set `HERMES_AGENT_DIR` to point at a checkout. After a deliberate change to the
+contract, regenerate its fixtures with
+`PUSHARY_UPDATE_CONTRACT_FIXTURES=1 PYTHONPATH=. python3 -m unittest discover -s tests -p test_desktop_contract.py`.
+The typed modules are checked with
+`uvx mypy@1.13.0 --strict --follow-imports=silent pushary_plugin/approval_ledger.py pushary_plugin/cancellation.py pushary_plugin/desktop_answers.py pushary_plugin/desktop_contract.py`.
+
 `tests/test_hermes_contract.py` checks this plugin's assumptions against the
 Hermes it is running inside: that every hook it registers is one Hermes fires,
 that the callback budget it clamps to is the one Hermes enforces, and that the
@@ -205,7 +278,7 @@ Hermes upgrade. On a Hermes older than v0.21.6, that interpreter is in its
 virtualenv:
 
 ```bash
-PYTHONPATH=. ~/.hermes/hermes-agent/venv/bin/python3 -m unittest discover -s tests
+PYTHONPATH=.:$HOME/.hermes/hermes-agent ~/.hermes/hermes-agent/venv/bin/python3 -m unittest discover -s tests
 ```
 
 ## License

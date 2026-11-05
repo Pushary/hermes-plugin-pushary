@@ -15,6 +15,12 @@ from pathlib import Path
 
 from pushary_plugin import history
 
+CLI_HELPERS = Path(__file__).resolve().parents[2] / "agent-hooks" / "bin"
+requires_the_cli_helpers = unittest.skipUnless(
+    CLI_HELPERS.is_dir(),
+    "runs the Pushary CLI's own transcript helpers, which only the Pushary monorepo carries",
+)
+
 try:
     from hermes_state import SessionDB
 except ImportError:
@@ -248,8 +254,9 @@ class HistoryTests(unittest.TestCase):
                 history._authorized_command("fixture")
             self.assertEqual(ask.call_count, 7)
 
+    @requires_the_cli_helpers
     def test_a_computer_without_a_cli_account_says_once_per_process_that_history_is_not_saved(self):
-        helper_source = Path(__file__).resolve().parents[2] / "agent-hooks/bin/pushary-transcript-register.ts"
+        helper_source = CLI_HELPERS / "pushary-transcript-register.ts"
         bun = shutil.which("bun")
         self.assertIsNotNone(bun)
         clock = _Clock()
@@ -362,8 +369,9 @@ class HistoryTests(unittest.TestCase):
             consent.write_text(json.dumps({**account, "enabled": True}))
             self.assertIsNone(history._registration_command("another-key"))
 
+    @requires_the_cli_helpers
     def test_export_authorization_uses_the_real_native_grant_contract(self):
-        helper_source = Path(__file__).resolve().parents[2] / "agent-hooks/bin/pushary-native-transcripts.ts"
+        helper_source = CLI_HELPERS / "pushary-native-transcripts.ts"
         bun = shutil.which("bun")
         self.assertIsNotNone(bun)
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(Path, "home", return_value=Path(directory)):
@@ -394,8 +402,9 @@ class HistoryTests(unittest.TestCase):
                 (root / "machine-id").write_text("another-machine")
                 self.assertIsNone(history._registration_command("fixture"))
 
+    @requires_the_cli_helpers
     def test_cli_export_requires_the_cli_account_server_and_preferences(self):
-        helper_source = Path(__file__).resolve().parents[2] / "agent-hooks/bin/pushary-transcript-register.ts"
+        helper_source = CLI_HELPERS / "pushary-transcript-register.ts"
         bun = shutil.which("bun")
         self.assertIsNotNone(bun)
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(Path, "home", return_value=Path(directory)):

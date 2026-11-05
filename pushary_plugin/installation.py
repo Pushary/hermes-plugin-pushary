@@ -79,7 +79,7 @@ def load_record(approval_transport_registered, pid, loaded_at):
     }
 
 
-def _process_is_running(pid):
+def process_is_running(pid):
     if os.name == "nt":
         return True
     try:
@@ -92,7 +92,7 @@ def _process_is_running(pid):
 
 
 def _record_belongs_to_running_process(record):
-    return record.stem.isdigit() and _process_is_running(int(record.stem))
+    return record.stem.isdigit() and process_is_running(int(record.stem))
 
 
 def _prune_expired_load_records(directory, keep, now):

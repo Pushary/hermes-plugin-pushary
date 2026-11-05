@@ -1,0 +1,204 @@
+{
+  "recent": [
+    {
+      "answerSource": "mobile_app",
+      "correlationId": "6f1c2d3e-4b5a-4c6d-8e7f-000000000010",
+      "hostOutcome": null,
+      "openedAtMs": 1793899940000,
+      "outcome": "once",
+      "settledAtMs": 1793899990000,
+      "subject": "git push --force origin release-10"
+    },
+    {
+      "answerSource": "hermes_desktop",
+      "correlationId": "6f1c2d3e-4b5a-4c6d-8e7f-000000000011",
+      "hostOutcome": null,
+      "openedAtMs": 1793899940000,
+      "outcome": "session",
+      "settledAtMs": 1793899989000,
+      "subject": "git push --force origin release-11"
+    },
+    {
+      "answerSource": "mac_app",
+      "correlationId": "6f1c2d3e-4b5a-4c6d-8e7f-000000000012",
+      "hostOutcome": null,
+      "openedAtMs": 1793899940000,
+      "outcome": "always",
+      "settledAtMs": 1793899988000,
+      "subject": "git push --force origin release-12"
+    },
+    {
+      "answerSource": "pushary",
+      "correlationId": "6f1c2d3e-4b5a-4c6d-8e7f-000000000013",
+      "hostOutcome": null,
+      "openedAtMs": 1793899940000,
+      "outcome": "deny",
+      "settledAtMs": 1793899987000,
+      "subject": "git push --force origin release-13"
+    },
+    {
+      "answerSource": null,
+      "correlationId": "6f1c2d3e-4b5a-4c6d-8e7f-000000000014",
+      "hostOutcome": null,
+      "openedAtMs": 1793899940000,
+      "outcome": "handed_to_hermes",
+      "settledAtMs": 1793899986000,
+      "subject": "git push --force origin release-14"
+    },
+    {
+      "answerSource": null,
+      "correlationId": "6f1c2d3e-4b5a-4c6d-8e7f-000000000015",
+      "hostOutcome": "transport_timeout",
+      "openedAtMs": 1793899940000,
+      "outcome": "ended",
+      "settledAtMs": 1793899984500,
+      "subject": "git push --force origin release-15"
+    }
+  ],
+  "setup": {
+    "apiKey": true,
+    "pluginVersion": "fixture",
+    "transport": false
+  },
+  "version": 1,
+  "waiting": [
+    {
+      "answerableHere": true,
+      "choices": [
+        {
+          "choice": "once",
+          "label": "Allow once"
+        },
+        {
+          "choice": "session",
+          "label": "Allow for this session"
+        },
+        {
+          "choice": "always",
+          "label": "Always allow"
+        },
+        {
+          "choice": "deny",
+          "label": "Deny"
+        }
+      ],
+      "claim": null,
+      "correlationId": "6f1c2d3e-4b5a-4c6d-8e7f-000000000001",
+      "deadlineAtMs": 1793900240000,
+      "openedAtMs": 1793899940000,
+      "routedTo": null,
+      "subject": "git push --force origin release-1"
+    },
+    {
+      "answerableHere": true,
+      "choices": [
+        {
+          "choice": "once",
+          "label": "Allow once"
+        },
+        {
+          "choice": "deny",
+          "label": "Deny"
+        }
+      ],
+      "claim": "claiming",
+      "correlationId": "6f1c2d3e-4b5a-4c6d-8e7f-000000000002",
+      "deadlineAtMs": 1793900240000,
+      "openedAtMs": 1793899950000,
+      "routedTo": null,
+      "subject": "git push --force origin release-2"
+    },
+    {
+      "answerableHere": true,
+      "choices": [
+        {
+          "choice": "once",
+          "label": "Allow once"
+        },
+        {
+          "choice": "deny",
+          "label": "Deny"
+        }
+      ],
+      "claim": "won",
+      "correlationId": "6f1c2d3e-4b5a-4c6d-8e7f-000000000003",
+      "deadlineAtMs": 1793900240000,
+      "openedAtMs": 1793899955000,
+      "routedTo": null,
+      "subject": "git push --force origin release-3"
+    },
+    {
+      "answerableHere": true,
+      "choices": [
+        {
+          "choice": "once",
+          "label": "Allow once"
+        },
+        {
+          "choice": "deny",
+          "label": "Deny"
+        }
+      ],
+      "claim": "lost",
+      "correlationId": "6f1c2d3e-4b5a-4c6d-8e7f-000000000004",
+      "deadlineAtMs": 1793900240000,
+      "openedAtMs": 1793899960000,
+      "routedTo": null,
+      "subject": "git push --force origin release-4"
+    },
+    {
+      "answerableHere": false,
+      "choices": [
+        {
+          "choice": "once",
+          "label": "Allow once"
+        },
+        {
+          "choice": "session",
+          "label": "Allow for this session"
+        },
+        {
+          "choice": "always",
+          "label": "Always allow"
+        },
+        {
+          "choice": "deny",
+          "label": "Deny"
+        }
+      ],
+      "claim": null,
+      "correlationId": "6f1c2d3e-4b5a-4c6d-8e7f-000000000005",
+      "deadlineAtMs": 1793900240000,
+      "openedAtMs": 1793899970000,
+      "routedTo": "Sam Patel",
+      "subject": "git push --force origin release-5"
+    },
+    {
+      "answerableHere": false,
+      "choices": [
+        {
+          "choice": "once",
+          "label": "Allow once"
+        },
+        {
+          "choice": "session",
+          "label": "Allow for this session"
+        },
+        {
+          "choice": "always",
+          "label": "Always allow"
+        },
+        {
+          "choice": "deny",
+          "label": "Deny"
+        }
+      ],
+      "claim": null,
+      "correlationId": "6f1c2d3e-4b5a-4c6d-8e7f-000000000006",
+      "deadlineAtMs": 1793900240000,
+      "openedAtMs": 1793899975000,
+      "routedTo": null,
+      "subject": "git push --force origin release-6"
+    }
+  ]
+}

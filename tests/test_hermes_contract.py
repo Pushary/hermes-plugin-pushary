@@ -6,12 +6,17 @@ from pathlib import Path
 from unittest import mock
 
 import pushary_plugin as plugin
-from pushary_plugin import approval, host, installation
+from pushary_plugin import approval, approval_ledger, desktop_contract, host, installation
 
 SANDBOX_HERMES_HOME = tempfile.TemporaryDirectory(prefix="pushary-hermes-home-")
 
 
+HERMES_REQUIRED = os.environ.get("PUSHARY_REQUIRE_HERMES") == "1"
+
+
 def setUpModule():
+    if HERMES_REQUIRED and hermes_plugins is None:
+        raise RuntimeError(f"PUSHARY_REQUIRE_HERMES=1 but Hermes is not importable: {HERMES_IMPORT_ERROR}")
     os.environ["HERMES_HOME"] = SANDBOX_HERMES_HOME.name
 
 
@@ -314,6 +319,134 @@ def _registered_tool_overrides():
     recorder = OverrideRecorder()
     plugin.register(recorder)
     return recorder.overrides
+
+
+
+def _present_through_hermes(present):
+    from types import SimpleNamespace
+
+    from tools import approval_context, approval_prompt
+
+    calls = []
+    manager = SimpleNamespace(get_approval_transport=lambda name: SimpleNamespace(present=present))
+    with mock.patch.object(approval_context, "_get_approval_transport_config", return_value=(host.TRANSPORT_NAME, None)), \
+            mock.patch.object(approval_context, "_get_approval_timeout", return_value=5), \
+            mock.patch.object(approval_context, "_fire_approval_hook", side_effect=lambda name, **kw: calls.append((name, kw))), \
+            mock.patch.object(approval_prompt, "get_plugin_manager", return_value=manager):
+        approval_prompt._present_with_selected_transport(
+            command="git push --force", description="", pattern_key="k", pattern_keys=["k"], session_key="s",
+            surface="cli", allow_session=False, allow_permanent=False,
+        )
+    return [kwargs for name, kwargs in calls if name == "post_approval_response"]
+
+
+@requires_hermes
+class DesktopHalfContractTest(unittest.TestCase):
+    def test_the_hook_that_ends_a_desktop_wait_is_one_the_host_fires(self):
+        self.assertIn("post_approval_response", hermes_plugins.VALID_HOOKS)
+
+    def test_the_host_names_our_transport_and_request_when_it_settles_one(self):
+        responses = _present_through_hermes(lambda request: request.respond("once"))
+        self.assertEqual(len(responses), 1)
+        self.assertEqual(responses[0]["surface"], plugin.PUSHARY_TRANSPORT_SURFACE)
+        self.assertTrue(approval_ledger.is_request_id(responses[0]["request_id"]))
+        self.assertEqual(responses[0]["choice"], "once")
+
+    def test_a_failed_transport_settles_with_a_choice_the_ledger_accepts(self):
+        def failing(request):
+            raise approval.TransportUnavailable("handed back")
+
+        choice = _present_through_hermes(failing)[0]["choice"]
+        self.assertIn(choice, desktop_contract.HOST_FAILURE_OUTCOMES)
+        self.assertTrue(approval_ledger.is_token(choice))
+
+    def test_every_way_hermes_fails_a_transport_is_one_the_desktop_half_names(self):
+        import time as clock
+
+        from hermes_cli import approval_transport as transport
+
+        def request():
+            return transport.ApprovalRequest.create(
+                command="git push --force", description="", pattern_key="k", pattern_keys=("k",), session_key="s",
+                surface="cli", allow_session=True, allow_permanent=True, timeout_seconds=5,
+            )
+
+        stale = request()
+
+        def run(present, timeout_seconds=2.0, is_interrupted=None):
+            return transport.invoke_approval_transport(present, request(), timeout_seconds=timeout_seconds,
+                                                       poll_interval=0.01, is_interrupted=is_interrupted).failure
+
+        def raising(req):
+            raise approval.TransportUnavailable("handed back")
+
+        failures = {
+            run(raising),
+            run(lambda req: clock.sleep(0.5), timeout_seconds=0.05),
+            run(lambda req: clock.sleep(0.5), is_interrupted=lambda: True),
+            run(lambda req: "once"),
+            run(lambda req: stale.respond("once")),
+        }
+        held = []
+        while transport._transport_worker_slots.acquire(blocking=False):
+            held.append(True)
+        try:
+            failures.add(run(lambda req: req.respond("once")))
+        finally:
+            for _ in held:
+                transport._transport_worker_slots.release()
+        self.assertEqual({f"transport_{failure}" for failure in failures}, set(desktop_contract.HOST_FAILURE_OUTCOMES))
+
+    def test_the_event_the_desktop_half_listens_for_is_the_name_hermes_broadcasts(self):
+        from hermes_cli.plugin_events import broadcast_plugin_event, plugin_event_name
+
+        self.assertTrue(callable(broadcast_plugin_event))
+        self.assertEqual(
+            plugin_event_name(desktop_contract.PLUGIN_ID, desktop_contract.APPROVALS_CHANGED_EVENT),
+            desktop_contract.APPROVALS_CHANGED_WIRE_EVENT,
+        )
+
+    def test_the_backend_serves_through_the_hosts_own_mount(self):
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except Exception as exc:
+            self.skipTest(f"FastAPI is not importable here ({exc})")
+        import json
+        import sys
+        import time
+
+        from hermes_cli.web_server_dashboard import _dashboard_plugin_entry, _mount_one_plugin_api
+
+        dashboard = Path(plugin.__file__).parent / "dashboard"
+        entry = _dashboard_plugin_entry(json.loads((dashboard / "manifest.json").read_text()), desktop_contract.PLUGIN_ID,
+                                        dashboard, "bundled")
+        app = FastAPI()
+        self.assertTrue(_mount_one_plugin_api(app, entry, {desktop_contract.PLUGIN_ID}, set()))
+        backend_ledger = sys.modules["pushary_plugin_desktop_backend.approval_ledger"]
+        backend_installation = sys.modules["pushary_plugin_desktop_backend.installation"]
+        with tempfile.TemporaryDirectory(prefix="pushary-mount-") as directory, \
+                mock.patch.object(backend_installation, "hermes_home", return_value=Path(directory)):
+            now = int(time.time() * 1000)
+            backend_ledger.open_approval(Path(directory), correlation_id="5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d",
+                                         request_id=None, subject="git push --force",
+                                         choices=backend_ledger.offered_choices((("once", "Allow once"),)),
+                                         pid=os.getpid(), opened_at_ms=now, deadline_at_ms=now + 60_000)
+            response = TestClient(app).get(f"/api/plugins/{desktop_contract.PLUGIN_ID}{desktop_contract.APPROVALS_PATH}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["version"], desktop_contract.CONTRACT_VERSION)
+        self.assertEqual(len(response.json()["waiting"]), 1)
+
+    def test_the_backend_mounts_with_the_hosts_own_loader_rules(self):
+        from hermes_cli.web_server_dashboard import _dashboard_plugin_entry
+        import json
+
+        dashboard = Path(plugin.__file__).parent / "dashboard"
+        entry = _dashboard_plugin_entry(json.loads((dashboard / "manifest.json").read_text()), desktop_contract.PLUGIN_ID,
+                                        dashboard, "user")
+        self.assertTrue(entry["has_api"])
+        self.assertTrue(entry["tab"].get("hidden"))
+        self.assertTrue((dashboard / entry["entry"]).is_file())
 
 
 if __name__ == "__main__":

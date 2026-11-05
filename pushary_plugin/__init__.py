@@ -81,6 +81,7 @@ def register(ctx):
         "on_session_start": _on_session_start,
         "on_session_end": _on_session_end,
         "on_session_finalize": _on_session_finalize,
+        "post_approval_response": _on_post_approval_response,
     }
     for hook_name, callback in hooks.items():
         ctx.register_hook(hook_name, callback)
@@ -286,6 +287,15 @@ def _on_pre_tool_call(tool_name=None, args=None, session_id=None, **kwargs):
         return _block_unapproved(tool_name)
     except Exception:
         return _block_unapproved(tool_name)
+
+
+PUSHARY_TRANSPORT_SURFACE = f"transport:{host.TRANSPORT_NAME}"
+
+
+def _on_post_approval_response(choice=None, surface=None, request_id=None, **kwargs):
+    if surface == PUSHARY_TRANSPORT_SURFACE and request_id:
+        approval.record_host_outcome(str(request_id), choice)
+    return None
 
 
 def _tool_failed(result, status):

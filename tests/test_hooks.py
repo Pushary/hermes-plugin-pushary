@@ -100,7 +100,7 @@ class RegistrationTest(unittest.TestCase):
         self.assertEqual(
             ctx.hooks,
             ["pre_llm_call", "pre_tool_call", "post_tool_call", "on_session_start",
-             "on_session_end", "on_session_finalize"],
+             "on_session_end", "on_session_finalize", "post_approval_response"],
         )
 
     def test_registers_the_approval_transport_and_prompt_section(self):
@@ -999,7 +999,7 @@ class LoadRecordTest(unittest.TestCase):
         now = 2_000_000_000
         os.utime(stale, (now - installation.LOAD_RECORD_RETENTION_SECONDS - 1,) * 2)
         os.utime(recent, (now - 60,) * 2)
-        with mock.patch.object(installation, "_process_is_running", return_value=False):
+        with mock.patch.object(installation, "process_is_running", return_value=False):
             installation.record_plugin_load(True, home=self.home, pid=13, now=now)
         self.assertFalse(stale.exists())
         self.assertTrue(recent.exists())
@@ -1012,12 +1012,12 @@ class LoadRecordTest(unittest.TestCase):
         gateway.write_text("{}", encoding="utf-8")
         now = 2_000_000_000
         os.utime(gateway, (now - installation.LOAD_RECORD_RETENTION_SECONDS - 1,) * 2)
-        with mock.patch.object(installation, "_process_is_running", side_effect=lambda pid: pid == 21):
+        with mock.patch.object(installation, "process_is_running", side_effect=lambda pid: pid == 21):
             installation.record_plugin_load(True, home=self.home, pid=22, now=now)
         self.assertTrue(gateway.exists())
 
     def test_this_process_counts_as_running(self):
-        self.assertTrue(installation._process_is_running(os.getpid()))
+        self.assertTrue(installation.process_is_running(os.getpid()))
 
     def test_an_unwritable_home_never_breaks_registration(self):
         blocker = self.home / "not-a-directory"

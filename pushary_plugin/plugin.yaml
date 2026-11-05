@@ -1,5 +1,5 @@
 name: pushary
-version: 0.9.2
+version: 1.0.0
 description: Push notifications and human-in-the-loop for Hermes Agent via Pushary
 author: RalphNex OU
 requires_env:
@@ -7,6 +7,13 @@ requires_env:
     description: Your Pushary API key
     url: https://pushary.com/sign-up?from=hermes
     secret: true
+config_schema:
+  api_key:
+    type: secret
+    env: PUSHARY_API_KEY
+    label: Pushary API key
+    description: "Get one at pushary.com/sign-up?from=hermes"
+    required: true
 provides_tools:
   - pushary_remind
   - pushary_notify
@@ -23,5 +30,6 @@ provides_hooks:
   - on_session_start
   - on_session_end
   - on_session_finalize
+  - post_approval_response
 provides_approval_transports:
   - pushary
