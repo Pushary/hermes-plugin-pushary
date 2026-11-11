@@ -136,7 +136,7 @@ How long your phone has depends on your delivery mode. Under Every time
 notification lands. Under When I'm out (`push_first`), your phone has the push window,
 20 seconds unless you change it, and then Hermes' own prompt takes over.
 
-On a Pushary Team workspace, an approval route that enforces who answers ("Only
+On a [Pushary Team workspace](https://pushary.com/teams?utm_source=github&utm_medium=oss-adapter&utm_campaign=hermes-plugin&utm_content=readme-teams), an approval route that enforces who answers ("Only
 they can answer") is never handed to Hermes' own prompt or answered in Hermes
 Desktop. The plugin waits for the route's approvers until Hermes' timeout, and
 denies if none of them answers.
