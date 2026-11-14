@@ -5,10 +5,10 @@ import time
 from typing import Literal, Optional, Tuple
 
 from . import api, approval_ledger, cancellation, desktop_answers, desktop_contract, identity, installation
+from .approval_coverage import HERMES_SHELL_TOOL
 
 logger = logging.getLogger(__name__)
 
-HERMES_SHELL_TOOL = "terminal"
 DECISION_LINE_MAX = 500
 ACTION_BODY_MAX = 4000
 

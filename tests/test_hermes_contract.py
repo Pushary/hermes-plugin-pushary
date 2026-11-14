@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 import pushary_plugin as plugin
-from pushary_plugin import approval, approval_ledger, desktop_contract, host, installation
+from pushary_plugin import approval, approval_coverage, approval_ledger, desktop_contract, host, installation
 
 SANDBOX_HERMES_HOME = tempfile.TemporaryDirectory(prefix="pushary-hermes-home-")
 
@@ -447,6 +447,44 @@ class DesktopHalfContractTest(unittest.TestCase):
         self.assertTrue(entry["has_api"])
         self.assertTrue(entry["tab"].get("hidden"))
         self.assertTrue((dashboard / entry["entry"]).is_file())
+
+
+@requires_hermes
+class ContainerBackendContractTest(unittest.TestCase):
+    def test_the_shell_tool_we_name_is_hermes_terminal_tool(self):
+        from tools.terminal_tool import TERMINAL_SCHEMA
+
+        self.assertEqual(TERMINAL_SCHEMA["name"], approval_coverage.HERMES_SHELL_TOOL)
+
+    def test_the_built_in_backends_we_call_skipping_are_the_ones_hermes_skips(self):
+        from tools import approval as hermes_approval
+
+        for backend in ("local", "ssh", "modal", "daytona", "vercel_sandbox"):
+            ours = approval_coverage.skips_dangerous_command_approvals({"TERMINAL_ENV": backend}, {})
+            self.assertEqual(ours, hermes_approval._should_skip_container_guards(backend), backend)
+        self.assertTrue(hermes_approval._should_skip_container_guards("docker", has_host_access=False))
+        self.assertFalse(hermes_approval._should_skip_container_guards("docker", has_host_access=True))
+
+    def test_we_read_host_access_the_way_hermes_does(self):
+        from tools.terminal_tool import _docker_has_host_access, _docker_volume_uses_host_path
+
+        for spec in ("/srv:/srv", "~/a:/a", "./a:/a", "../a:/a", "C:\\a:/a", "D:/a:/a", "cache:/cache", "", "  /x:/x"):
+            self.assertEqual(approval_coverage.volume_binds_host_path(spec), _docker_volume_uses_host_path(spec), spec)
+        mounted_volume = {"TERMINAL_ENV": "docker", "TERMINAL_DOCKER_VOLUMES": '["/srv:/srv"]'}
+        self.assertFalse(approval_coverage.skips_dangerous_command_approvals(mounted_volume, {}))
+        self.assertTrue(_docker_has_host_access({"env_type": "docker", "docker_volumes": ["/srv:/srv"]}))
+        self.assertFalse(_docker_has_host_access({"env_type": "docker", "docker_volumes": []}))
+        self.assertTrue(_docker_has_host_access({"env_type": "docker", "docker_mount_cwd_to_workspace": True,
+                                                 "host_cwd": "/srv/app", "docker_volumes": []}))
+        mounted_start_folder = {"TERMINAL_ENV": "docker", "TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE": "true"}
+        self.assertFalse(approval_coverage.skips_dangerous_command_approvals(mounted_start_folder, {}))
+
+    def test_the_environment_names_we_read_are_the_ones_hermes_bridges(self):
+        from hermes_cli.config import TERMINAL_CONFIG_ENV_MAP
+
+        self.assertEqual(TERMINAL_CONFIG_ENV_MAP["backend"], approval_coverage.TERMINAL_BACKEND_ENV)
+        self.assertEqual(TERMINAL_CONFIG_ENV_MAP["docker_mount_cwd_to_workspace"], approval_coverage.DOCKER_MOUNT_CWD_ENV)
+        self.assertEqual(TERMINAL_CONFIG_ENV_MAP["docker_volumes"], approval_coverage.DOCKER_VOLUMES_ENV)
 
 
 if __name__ == "__main__":

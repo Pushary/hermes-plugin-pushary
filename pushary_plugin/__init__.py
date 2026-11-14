@@ -4,7 +4,7 @@ import os
 import threading
 from pathlib import Path
 
-from . import api, approval, history, host, identity, installation, schemas, tools
+from . import api, approval, approval_coverage, history, host, identity, installation, schemas, tools
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,7 @@ def register(ctx):
                 ctx.register_skill(child.name, skill_md)
 
     installation.record_plugin_load(transport)
+    _warn_when_hermes_skips_the_shell()
 
     logger.info(
         "[pushary] Plugin registered: %d tools, %d hooks, approval transport %s",
@@ -129,8 +130,14 @@ def _register_system_prompt_section(ctx):
 
 
 def _gated_tools():
-    raw = os.environ.get("PUSHARY_GATE_TOOLS", "")
-    return {name.strip().lower() for name in raw.split(",") if name.strip()}
+    raw = os.environ.get(approval_coverage.GATE_TOOLS_ENV, "")
+    return {name.strip().lower() for name in raw.split(approval_coverage.GATE_TOOLS_SEPARATOR) if name.strip()}
+
+
+def _warn_when_hermes_skips_the_shell():
+    warning = approval_coverage.shell_gate_warning(os.environ, host.terminal_config(), _gated_tools())
+    if warning:
+        logger.warning(warning)
 
 
 def _egress_redactor():

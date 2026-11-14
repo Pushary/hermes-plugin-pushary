@@ -136,6 +136,10 @@ def gate_budget_seconds(requested_seconds):
     return max(1.0, min(float(requested_seconds), ceiling, GATE_MAX_SECONDS))
 
 
+def terminal_config():
+    return _section(_config(), "terminal")
+
+
 def pushary_is_selected_transport():
     selected = _section(_config(), "security", "approval").get("transport")
     return str(selected or "").strip().lower() == TRANSPORT_NAME

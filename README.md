@@ -50,7 +50,7 @@ from its own virtualenv. There, you can install the package with that
 virtualenv's Python and add `pushary` to `plugins.enabled`:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.1
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.2
 ```
 
 ## Setup
@@ -187,9 +187,14 @@ To gate specific tools rather than Hermes' dangerous-command set, set
 `PUSHARY_GATE_TOOLS`. This runs inside the `pre_tool_call` hook.
 
 ```bash
-export PUSHARY_GATE_TOOLS="terminal,write_file"
-export PUSHARY_GATE_TIMEOUT_MS=25000
+hermes config set PUSHARY_GATE_TOOLS terminal,write_file
+hermes config set PUSHARY_GATE_TIMEOUT_MS 25000
+hermes gateway restart
 ```
+
+`hermes config set` saves both in `~/.hermes/.env`, which a gateway running as a
+service also loads. An `export` in your shell profile reaches only a Hermes you
+start from that shell.
 
 | Outcome | Result |
 |---------|--------|
@@ -212,6 +217,35 @@ it for a deadline that does not exist.
 When both are configured the transport wins: the hook escalates to Hermes' own
 approval gate, which gets the full 300-second window and the once/session/always
 choices, instead of holding a 30-second hook open on a network call.
+
+## Container terminal backends
+
+Hermes skips its own dangerous-command check when its terminal backend is a
+container: `docker` with no host folder mounted (a host path in `docker_volumes`
+or `TERMINAL_DOCKER_VOLUMES`, or the start folder with
+`docker_mount_cwd_to_workspace`), `modal`, `daytona`,
+`vercel_sandbox`, or a plugin backend that marks itself as a sandbox. It treats the container as the boundary. The approval transport
+only hears about commands Hermes flags, so on those backends no dangerous-command
+approval reaches your phone, and Pushary gates only the tools listed in
+`PUSHARY_GATE_TOOLS`. Your own `approvals.deny` rules still apply.
+
+To gate every shell command there, add `terminal` to the list and restart Hermes:
+
+```bash
+hermes config set PUSHARY_GATE_TOOLS terminal
+hermes gateway restart
+```
+
+`hermes config set` saves it in `~/.hermes/.env`, which Hermes loads for both
+the gateway and the terminal. An `export` in your shell profile does not reach a
+gateway that runs as a service. Hermes skips the same check for `execute_code`,
+so add that tool too if you use it.
+
+When Hermes loads the plugin on `docker` with no host folder, `modal`, `daytona`
+or `vercel_sandbox`, and `PUSHARY_GATE_TOOLS` does not name `terminal`, the
+plugin logs one warning with that command. It cannot tell whether a plugin
+backend such as `singularity` or `sprites` skips the check, so it stays quiet
+there; `npx pushary@latest doctor` names it.
 
 For an escalated per-tool gate, **Always allow** creates a standing rule for the
 whole tool name, covering its future calls with different arguments. Choose
@@ -267,7 +301,7 @@ set `HERMES_AGENT_DIR` to point at a checkout. After a deliberate change to the
 contract, regenerate its fixtures with
 `PUSHARY_UPDATE_CONTRACT_FIXTURES=1 PYTHONPATH=. python3 -m unittest discover -s tests -p test_desktop_contract.py`.
 The typed modules are checked with
-`uvx mypy@1.13.0 --strict --follow-imports=silent pushary_plugin/approval_ledger.py pushary_plugin/cancellation.py pushary_plugin/desktop_answers.py pushary_plugin/desktop_contract.py`.
+`uvx mypy@1.13.0 --strict --follow-imports=silent pushary_plugin/approval_coverage.py pushary_plugin/approval_ledger.py pushary_plugin/cancellation.py pushary_plugin/desktop_answers.py pushary_plugin/desktop_contract.py`.
 
 `tests/test_hermes_contract.py` checks this plugin's assumptions against the
 Hermes it is running inside: that every hook it registers is one Hermes fires,
