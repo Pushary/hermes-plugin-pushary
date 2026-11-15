@@ -10,6 +10,7 @@ import unittest
 import shutil
 import shlex
 import sqlite3
+import subprocess
 from unittest import mock
 from pathlib import Path
 
@@ -20,6 +21,16 @@ requires_the_cli_helpers = unittest.skipUnless(
     CLI_HELPERS.is_dir(),
     "runs the Pushary CLI's own transcript helpers, which only the Pushary monorepo carries",
 )
+
+HELPER_START_ROOM_SECONDS = 120
+_run_helper = subprocess.run
+
+
+def _run_with_room_to_start(*args, **kwargs):
+    return _run_helper(*args, **{**kwargs, "timeout": HELPER_START_ROOM_SECONDS})
+
+
+helpers_have_room_to_start = mock.patch.object(history.subprocess, "run", _run_with_room_to_start)
 
 try:
     from hermes_state import SessionDB
@@ -255,6 +266,7 @@ class HistoryTests(unittest.TestCase):
             self.assertEqual(ask.call_count, 7)
 
     @requires_the_cli_helpers
+    @helpers_have_room_to_start
     def test_a_computer_without_a_cli_account_says_once_per_process_that_history_is_not_saved(self):
         helper_source = CLI_HELPERS / "pushary-transcript-register.ts"
         bun = shutil.which("bun")
@@ -370,6 +382,7 @@ class HistoryTests(unittest.TestCase):
             self.assertIsNone(history._registration_command("another-key"))
 
     @requires_the_cli_helpers
+    @helpers_have_room_to_start
     def test_export_authorization_uses_the_real_native_grant_contract(self):
         helper_source = CLI_HELPERS / "pushary-native-transcripts.ts"
         bun = shutil.which("bun")
@@ -403,6 +416,7 @@ class HistoryTests(unittest.TestCase):
                 self.assertIsNone(history._registration_command("fixture"))
 
     @requires_the_cli_helpers
+    @helpers_have_room_to_start
     def test_cli_export_requires_the_cli_account_server_and_preferences(self):
         helper_source = CLI_HELPERS / "pushary-transcript-register.ts"
         bun = shutil.which("bun")
@@ -431,6 +445,7 @@ class HistoryTests(unittest.TestCase):
                     helper.write_text("#!/bin/sh\nprintf '%s' " + shlex.quote(reply) + "\n")
                     self.assertIsNone(history._registration_command("profile-key"))
 
+    @helpers_have_room_to_start
     def test_the_history_helper_receives_only_the_environment_it_reads(self):
         with tempfile.TemporaryDirectory() as directory:
             calls = Path(directory) / "helper-calls.jsonl"
@@ -454,7 +469,8 @@ class HistoryTests(unittest.TestCase):
                     mock.patch.dict("os.environ", inherited, clear=True), \
                     mock.patch.object(history.shutil, "which", return_value=str(helper)):
                 command = history._registration_command("profile-key")
-                self.assertEqual(command, [str(helper), "hermes"])
+                self.assertEqual(command, [str(helper), "hermes"],
+                                 f"helper calls recorded: {calls.read_text() if calls.exists() else 'none, so the helper never ran'}")
                 with mock.patch.object(history.api, "_get_api_key", return_value="profile-key"), \
                         mock.patch.object(history, "_authorized_command", return_value=command), \
                         mock.patch.object(history, "read_display_history", return_value=[]):
