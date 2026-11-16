@@ -344,7 +344,7 @@ class HistoryTests(unittest.TestCase):
             hermes.get_hermes_home = lambda: Path(directory)
             snapshots = Path(directory) / ".pushary" / "hermes-history" / "another-account"
             snapshots.mkdir(parents=True)
-            expired = time.time() - history.SNAPSHOT_RETENTION_SECONDS - 1
+            expired = clock.time() - history.SNAPSHOT_RETENTION_SECONDS - 1
 
             def stale(name):
                 path = snapshots / name
