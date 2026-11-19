@@ -215,8 +215,8 @@ class HistoryTests(unittest.TestCase):
     def test_a_conversation_too_large_to_export_leaves_an_unavailable_snapshot_and_the_exporter_keeps_running(self):
         clock = _Clock()
         wide = {"id": "hermes:1", "role": "user", "timestamp": "2026-10-24T00:00:00Z",
-                "content": [{"type": "text", "text": "\u6f22" * 400}]}
-        self.assertLess(len(json.dumps(wide, ensure_ascii=False).encode("utf-8")), 2_000)
+                "content": [{"type": "text", "text": "\u6f22" * 800}]}
+        self.assertGreater(len(json.dumps(wide, ensure_ascii=False).encode("utf-8")), 2_000)
         registrations = []
 
         def between(tick):
@@ -729,7 +729,7 @@ class HistoryTests(unittest.TestCase):
                 database.rewind_to_message("fixture", second)
                 after = history.read_display_history(path, "fixture")
                 self.assertEqual([message["id"] for message in after], [f"hermes:{first}"])
-                with mock.patch.object(history, "MAX_SOURCE_BYTES", 1):
+                with mock.patch.object(history, "MAX_DATABASE_BYTES", 1):
                     with self.assertRaises(ValueError):
                         history.read_display_history(path, "fixture")
                 with self.assertRaises(ValueError):
@@ -737,10 +737,36 @@ class HistoryTests(unittest.TestCase):
             finally:
                 database.close()
 
-    def test_only_display_history_and_tool_evidence_are_exported(self):
+    @unittest.skipIf(SessionDB is None, "requires the upstream Hermes runtime")
+    def test_long_display_history_ignores_tool_payloads_and_refuses_child_sources(self):
+        with contextlib.ExitStack() as setup, tempfile.TemporaryDirectory() as directory:
+            setup.enter_context(mock.patch("hermes_cli.venv_sync.prepare_launch", return_value=None))
+            setup.enter_context(mock.patch("hermes_cli._early_recovery.recover_if_needed", return_value=False))
+            setup.enter_context(mock.patch("pm.environments.activate_dependencies", return_value=None))
+            path = Path(directory) / "state.db"
+            database = SessionDB(db_path=path)
+            try:
+                database.create_session("root", "cli")
+                database.create_session("child", "subagent", parent_session_id="root")
+                database.append_message("child", "user", "delegated prompt", timestamp=1)
+                expected = [f"turn {index} 🌱" for index in range(240)]
+                for index, text in enumerate(expected):
+                    database.append_message("root", "assistant" if index % 2 else "user", text, timestamp=500-index)
+                database.append_message("root", "tool", "x" * 400_000, timestamp=501)
+                with mock.patch.object(history, "MAX_SOURCE_BYTES", 300_000):
+                    turns = history.read_display_history(path, "root")
+                    history.write_snapshot(Path(directory) / "root.json", "root", turns)
+                self.assertEqual([turn["content"][0]["text"] for turn in turns], expected)
+                with self.assertRaises(ValueError):
+                    history.read_display_history(path, "child")
+            finally:
+                database.close()
+
+    @unittest.skipIf(SessionDB is None, "requires the upstream Hermes display and redaction helpers")
+    def test_only_visible_text_is_exported(self):
         rows = [
-            {"id": 1, "role": "user", "content": "Hello", "timestamp": 1792670400, "active": 1},
-            {"id": 2, "role": "assistant", "content": "Done", "timestamp": 1792670401, "compacted": 1,
+            {"id": 1, "role": "user", "content": "Hello Bearer synthetic-test-credential-1234567890", "timestamp": 1792670400, "active": 1},
+            {"id": 2, "role": "assistant", "content": "<think>private</think>Done", "timestamp": 1792670401, "compacted": 1,
              "reasoning_content": "Never export", "tool_calls": [{"id": "t", "function": {"name": "terminal", "arguments": '{"command":"pwd"}'}}]},
             {"id": 3, "role": "tool", "content": '{"output":"/work","exit_code":0}', "timestamp": 1792670402, "active": 1, "tool_call_id": "t"},
             {"id": 4, "role": "assistant", "content": "Rewound", "timestamp": 1792670403, "active": 0, "compacted": 0},
@@ -748,16 +774,33 @@ class HistoryTests(unittest.TestCase):
             {"id": 6, "role": "system", "content": "System", "timestamp": 1792670405, "active": 1},
         ]
         result = history.normalize_messages(rows)
-        self.assertEqual([message["id"] for message in result], ["hermes:1", "hermes:2", "hermes:3"])
-        self.assertEqual(result[1]["content"][1]["name"], "terminal")
-        self.assertEqual(result[2]["content"][0]["tool_use_id"], "t")
+        self.assertEqual([message["id"] for message in result], ["hermes:1", "hermes:2"])
+        self.assertEqual(result[1]["content"], [{"type": "text", "text": "Done", "visibility": "hermes-visible-text-v1"}])
         self.assertNotIn("Never export", json.dumps(result))
+        self.assertNotIn("synthetic-test-credential", json.dumps(result))
         self.assertTrue(result[0]["timestamp"].endswith("Z"))
 
+    @unittest.skipIf(SessionDB is None, "requires the upstream Hermes display and redaction helpers")
     def test_plain_json_looking_text_is_not_reinterpreted(self):
         text = '{"text":"literal JSON"}'
         result = history.normalize_messages([{"id": 1, "role": "user", "content": text, "timestamp": 1, "active": 1}])
-        self.assertEqual(result[0]["content"], [{"type": "text", "text": text}])
+        self.assertEqual(result[0]["content"], [{"type": "text", "text": text, "visibility": "hermes-visible-text-v1"}])
+
+    @unittest.skipIf(SessionDB is None, "requires the upstream Hermes display helpers")
+    def test_authored_words_survive_steering_and_compaction(self):
+        from agent.context_compressor import SUMMARY_PREFIX, HISTORICAL_TASK_HEADING, _SUMMARY_END_MARKER
+        from agent.prompt_builder import format_steer_marker
+        handoff = f"{SUMMARY_PREFIX}\n\n{HISTORICAL_TASK_HEADING}\nprivate old work\n\n{_SUMMARY_END_MARKER}"
+        base = {"role": "user", "active": 1, "timestamp": 1}
+        rows = [
+            {**base, "id": 1, "display_kind": "steer", "content": format_steer_marker("stop here")},
+            {**base, "id": 2, "display_kind": "steer", "content": "plain correction"},
+            {**base, "id": 3, "display_kind": "hidden", "content": handoff + "\n\nshow the result"},
+            {**base, "id": 4, "content": handoff},
+            {**base, "id": 5, "role": "tool", "display_kind": "steer", "content": "private tool result"},
+        ]
+        result = history.normalize_messages(rows)
+        self.assertEqual([row["content"][0]["text"] for row in result], ["stop here", "plain correction", "show the result"])
 
     def test_invalid_timestamp_or_id_cannot_become_a_complete_snapshot(self):
         for row in [{"id": 1, "timestamp": float("nan")}, {"id": None, "timestamp": 1}]:

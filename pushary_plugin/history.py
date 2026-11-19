@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 from typing import NamedTuple
@@ -20,8 +21,9 @@ from typing import NamedTuple
 from . import api
 
 logger = logging.getLogger(__name__)
-MAX_MESSAGES = 5000
-MAX_SOURCE_BYTES = 20_000_000
+MAX_DATABASE_ROWS = 25_000
+MAX_DATABASE_BYTES = 64_000_000
+MAX_SOURCE_BYTES = 64_000_000
 POLL_SECONDS = 5
 SNAPSHOT_REFRESH_SECONDS = 60
 AUTHORIZATION_LIFETIME_SECONDS = 60
@@ -59,44 +61,38 @@ _next_prune_at = 0.0
 _history_not_allowed_reported = False
 
 
-def _text_blocks(content: object) -> list[dict[str, object]]:
+def _visible_text(content: object, role: str) -> list[dict[str, str]]:
+    from agent.agent_runtime_helpers import strip_think_blocks
+    from agent.memory_context import fence_recalled_context
+    from agent.redact import redact_for_egress
+
     if isinstance(content, str):
-        return [{"type": "text", "text": content}]
-    if not isinstance(content, list):
+        parts = [content]
+    elif isinstance(content, list):
+        parts = [block["text"] for block in content if isinstance(block, dict)
+                 and block.get("type") in ("text", "input_text", "output_text")
+                 and not block.get("thought") and isinstance(block.get("text"), str)]
+    else:
         return []
-    return [{"type": "text", "text": block["text"]} for block in content
-            if isinstance(block, dict) and block.get("type") in ("text", "input_text", "output_text")
-            and isinstance(block.get("text"), str)]
+    text = "\n".join(parts)
+    if role == "assistant":
+        text = fence_recalled_context(strip_think_blocks(None, text))
+    if not text.strip() or text.lstrip().startswith("[System:"):
+        return []
+    return [{"type": "text", "text": redact_for_egress(text, urls=True), "visibility": "hermes-visible-text-v1"}]
 
 
-def _tool_blocks(calls: object) -> list[dict[str, object]]:
-    blocks = []
-    if not isinstance(calls, list):
-        return blocks
-    for call in calls:
-        if not isinstance(call, dict) or not isinstance(call.get("id"), str):
-            continue
-        function = call.get("function")
-        if not isinstance(function, dict) or not isinstance(function.get("name"), str):
-            continue
-        arguments = function.get("arguments", {})
-        if isinstance(arguments, str):
-            arguments = json.loads(arguments)
-        if not isinstance(arguments, dict):
-            raise ValueError("Invalid Hermes tool arguments")
-        blocks.append({"type": "tool_use", "id": call["id"], "name": function["name"], "input": arguments})
-    return blocks
-
-
-def normalize_messages(rows: list[object]) -> list[dict[str, object]]:
+def normalize_messages(rows: Sequence[object]) -> list[dict[str, object]]:
     messages = []
     for row in rows:
         if not isinstance(row, dict):
             raise ValueError("Invalid Hermes message")
-        if not (row.get("active") or row.get("compacted")) or row.get("display_kind") in ("hidden", "model_only"):
+        if not (row.get("active") or row.get("compacted")):
             continue
-        role = row.get("role")
-        if role not in ("user", "assistant", "tool") or row.get("_compressed_summary"):
+        if row.get("role") not in ("user", "assistant"):
+            continue
+        metadata = row.get("display_metadata")
+        if metadata and (not isinstance(metadata, dict) or metadata.get("model_only")):
             continue
         identity = row.get("id")
         stamp = row.get("timestamp")
@@ -104,16 +100,24 @@ def normalize_messages(rows: list[object]) -> list[dict[str, object]]:
             raise ValueError("Invalid Hermes message identity")
         if not isinstance(stamp, (int, float)) or not math.isfinite(stamp) or stamp <= 0:
             raise ValueError("Invalid Hermes message timestamp")
-        content = _text_blocks(row.get("content"))
-        if role == "assistant":
-            content.extend(_tool_blocks(row.get("tool_calls")))
-        elif role == "tool":
-            call_id = row.get("tool_call_id")
-            if not isinstance(call_id, str) or not call_id:
-                continue
-            content = [{"type": "tool_result", "tool_use_id": call_id, "content": content}]
+        from agent.compaction_display import project_compaction_message_for_display
+        projected = project_compaction_message_for_display(row)
+        if not projected or projected.get("_compressed_summary"):
+            continue
+        role = projected.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        value = projected.get("content")
+        if role == "user" and projected.get("display_kind") == "steer":
+            from agent.conversation_compression import _extract_steer_text_from_message
+            value = _extract_steer_text_from_message(projected) or value
+        elif projected.get("display_kind"):
+            continue
+        content = _visible_text(value, role)
+        if not content:
+            continue
         messages.append({
-            "id": f"hermes:{identity}", "role": "user" if role == "tool" else role,
+            "id": f"hermes:{identity}", "role": role,
             "timestamp": datetime.fromtimestamp(stamp, timezone.utc).isoformat().replace("+00:00", "Z"),
             "content": content,
         })
@@ -134,6 +138,9 @@ def read_display_history(database_path: Path, session_id: str) -> list[dict[str,
         lineage = database._resume_lineage_ids(session_id)
         if not lineage or len(lineage) > 100:
             raise ValueError("Unsupported Hermes compression lineage")
+        root = database.get_session(lineage[0])
+        if not root or root.get("parent_session_id") or root.get("source") in ("subagent", "tool"):
+            raise ValueError("Child history is not a primary conversation")
         columns = [row[1] for row in connection.execute("PRAGMA table_info(messages)")]
         required = {"id", "session_id", "role", "content", "timestamp", "active", "compacted", "display_kind", "message_uid"}
         if not required.issubset(columns):
@@ -144,9 +151,9 @@ def read_display_history(database_path: Path, session_id: str) -> list[dict[str,
         count, size = connection.execute(
             f"SELECT COUNT(*), SUM({row_bytes}) FROM messages WHERE session_id IN ({placeholders})", lineage
         ).fetchone()
-        if count > MAX_MESSAGES or (size or 0) > MAX_SOURCE_BYTES:
+        if count > MAX_DATABASE_ROWS or (size or 0) > MAX_DATABASE_BYTES:
             raise ValueError("Hermes history exceeds the bounded reader limit")
-        rows = database.get_messages(session_id, include_compacted=True, include_ancestors=True, limit=MAX_MESSAGES)
+        rows = database.get_messages(session_id, include_compacted=True, include_ancestors=True, limit=MAX_DATABASE_ROWS)
         return normalize_messages(rows)
     finally:
         database.close()
@@ -156,7 +163,7 @@ def write_snapshot(path: Path, session_id: str, messages: list[dict[str, object]
     value = {"version": 1, "sessionId": session_id, "updatedAtMs": int(time.time() * 1000), "messages": messages, "completed": completed}
     if error:
         value["error"] = error
-    encoded = json.dumps(value, ensure_ascii=True, allow_nan=False).encode("utf-8")
+    encoded = json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8")
     if len(encoded) > MAX_SOURCE_BYTES:
         raise ValueError("Hermes history export exceeds its size limit")
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)

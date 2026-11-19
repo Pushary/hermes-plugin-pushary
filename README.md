@@ -50,7 +50,7 @@ from its own virtualenv. There, you can install the package with that
 virtualenv's Python and add `pushary` to `plugins.enabled`:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.6
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.7
 ```
 
 ## Setup
@@ -342,7 +342,7 @@ Personal tools reach the operator on their configured phone, Mac or browser. Par
 ## Encrypted conversation history
 
 Version 0.9.0 exports the session's visible conversation through Hermes's read-only
-`SessionDB` API, including compacted ancestors and tool results. Rewound messages
+`SessionDB` API, including visible user and assistant text from compacted ancestors. Rewound messages
 are removed from the phone timeline. Separate reasoning and hidden/model-only
 messages are excluded. The source contract is checked against Hermes v0.22.4;
 older incompatible schemas report an unavailable source instead of guessing.
@@ -386,9 +386,11 @@ sessions registered with its own key and server: if Hermes uses another server,
 the snapshot is written on this computer but never uploaded. When this computer
 does not allow history, the plugin logs one warning per Hermes process.
 
+Phone history shows redacted user and assistant text, including mid-run steering and instructions recovered from compaction. It omits tool results, older unmarked Hermes records, and safety-refused prompts whose refusal status the phone cannot represent.
+
 A bounded, owner-only local snapshot feeds Pushary's existing redaction and
-end-to-end encryption path. The snapshot limit is 5,000 source rows / 20 MB;
-over-limit, unreadable or unsupported sources report a failure and preserve the
+end-to-end encryption path. The plugin reads up to 25,000 database rows and 64 MB of row data and caps the local snapshot at 64 MB. The CLI uploader selects the newest visible turns within 5,000 turns and 20 MB.
+Over-limit, unreadable or unsupported sources report a failure and preserve the
 history already saved on the phone. Snapshots are retried across uploader
 restarts, and new capture epochs preserve the user's backfill choice.
 
