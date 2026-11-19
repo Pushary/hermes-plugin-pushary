@@ -14,7 +14,7 @@ import tempfile
 import threading
 import time
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import NamedTuple
 
 from . import api
@@ -202,7 +202,7 @@ def _native_helper(root: Path) -> Path | None:
 def _is_owner_only_file(info: os.stat_result) -> bool:
     if not stat.S_ISREG(info.st_mode):
         return False
-    return os.name == "nt" or (info.st_mode & 0o077 == 0 and info.st_uid == os.getuid())
+    return info.st_mode & 0o077 == 0 and info.st_uid == os.getuid()
 
 
 def _owner_only_record_text(path: Path) -> str | None:
@@ -230,6 +230,8 @@ def _runnable_recorded_command(command: list[str]) -> list[str] | None:
 
 
 def _recorded_cli_helper(root: Path) -> list[str] | None:
+    if os.name == "nt":
+        return None
     try:
         text = _owner_only_record_text(root / CLI_HELPER_RECORD)
         value = None if text is None else json.loads(text)
@@ -238,11 +240,27 @@ def _recorded_cli_helper(root: Path) -> list[str] | None:
     return _runnable_recorded_command(value["command"]) if _is_recorded_command(value) else None
 
 
+def _helper_on_path() -> str | None:
+    if os.name != "nt":
+        return shutil.which(CLI_HELPER_NAME)
+    extensions = os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(";")
+    for directory in map(PureWindowsPath, os.get_exec_path()):
+        if not directory.is_absolute():
+            continue
+        for extension in extensions:
+            if extension.upper() not in {".EXE", ".COM", ".CMD", ".BAT"}:
+                continue
+            candidate = str(directory / (CLI_HELPER_NAME + extension))
+            if os.path.isfile(candidate):
+                return candidate
+    return None
+
+
 def _cli_helper(root: Path) -> list[str] | None:
     recorded = _recorded_cli_helper(root)
     if recorded is not None:
         return recorded
-    on_path = shutil.which(CLI_HELPER_NAME)
+    on_path = _helper_on_path()
     return [on_path] if on_path else None
 
 
@@ -285,10 +303,10 @@ def _file_state(path: Path | None) -> tuple[int, ...] | None:
 
 def _authorization_inputs(key: str) -> tuple[object, ...]:
     root = Path.home() / ".pushary"
-    helper = shutil.which(CLI_HELPER_NAME)
+    helper = _helper_on_path()
     sources = (root / "native-transcript-consent.json", root / "bridge-auth", root / "bridge-auth" / "agent-key.json",
                root / "machine-id", root / "bin" / "pushary-bridge", api.pushary_config_path(),
-               Path(helper) if helper else None, root / CLI_HELPER_RECORD)
+               Path(helper) if helper else None, root / CLI_HELPER_RECORD if os.name != "nt" else None)
     return (key, api.BASE_URL, os.environ.get("PUSHARY_TRANSCRIPTS"), helper, *(_file_state(source) for source in sources))
 
 

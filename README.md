@@ -50,7 +50,7 @@ from its own virtualenv. There, you can install the package with that
 virtualenv's Python and add `pushary` to `plugins.enabled`:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.5
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.6
 ```
 
 ## Setup
@@ -362,11 +362,11 @@ can:
   `/Applications`, `~/Applications`, or the location the app's bridge launcher
   recorded.
 - With the CLI, `npx pushary@latest setup --agents hermes` installs the CLI
-  globally and records the Node runtime and the helper's absolute path in
+  globally. On macOS and Linux, it records the Node runtime and the helper's absolute path in
   `~/.pushary/hermes-history-helper.json` (owner-only). If you set Hermes up with
   an earlier release, run that setup once more; where the CLI is already installed
-  globally, `pushary upgrade` writes the record too. The plugin
-  uses that record first, then falls back to `pushary-transcript-register` on
+  globally, `pushary upgrade` writes the record too. On Windows, Hermes uses only the globally installed helper on its own `PATH`. On macOS and Linux, the plugin
+  uses the saved record first, then falls back to `pushary-transcript-register` on
   `PATH`. It ignores a record that others can change, that is a link, or that
   names a missing file.
 

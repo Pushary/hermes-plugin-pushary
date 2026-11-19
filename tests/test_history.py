@@ -525,6 +525,7 @@ class HistoryTests(unittest.TestCase):
 
     @requires_the_cli_helpers
     @helpers_have_room_to_start
+    @unittest.skipIf(os.name == "nt", "Windows uses PATH for the CLI helper")
     def test_the_recorded_cli_helper_runs_the_real_contract_without_path(self):
         helper_source = CLI_HELPERS / "pushary-transcript-register.ts"
         bun = shutil.which("bun")
@@ -541,6 +542,33 @@ class HistoryTests(unittest.TestCase):
                 self.assertEqual(history._registration_command("profile-key"), [bun, str(helper_source), "hermes"])
                 self.assertIsNone(history._registration_command("another-key"), "the Hermes key must be the CLI's account")
 
+    @unittest.skipUnless(os.name == "nt", "requires a native Windows filesystem")
+    def test_windows_uses_the_real_absolute_path_entry_for_the_cli_helper(self):
+        with tempfile.TemporaryDirectory(prefix="Hermes CLI with spaces ") as directory:
+            root = Path(directory)
+            executable = root / (history.CLI_HELPER_NAME + ".CMD")
+            executable.touch()
+            with mock.patch.dict(os.environ, {"PATH": "." + os.pathsep + directory, "PATHEXT": ".EXE;.CMD"}):
+                self.assertEqual(history._cli_helper(root), [str(executable)])
+                executable.unlink()
+                self.assertIsNone(history._cli_helper(root))
+
+    def test_windows_finds_the_helper_on_path_without_opening_the_saved_record(self):
+        root = Path.home() / ".pushary"
+        bin_dir = r"C:\Program Files\npm"
+        helper = bin_dir + "\\" + history.CLI_HELPER_NAME + ".CMD"
+        with mock.patch.object(history.os, "name", "nt"), \
+             mock.patch.object(history, "_owner_only_record_text", return_value=None) as read_record, \
+             mock.patch.dict(os.environ, {"PATHEXT": ".EXE;.CMD"}), \
+             mock.patch.object(os, "get_exec_path", return_value=[".", "", r"\drive-relative", bin_dir]), \
+             mock.patch.object(os.path, "isfile", side_effect=lambda path: path == helper) as exists:
+            self.assertEqual(history._cli_helper(root), [helper])
+            self.assertTrue(all(check.args[0].startswith(bin_dir) for check in exists.call_args_list))
+            exists.side_effect = lambda path: False
+            self.assertIsNone(history._cli_helper(root))
+            read_record.assert_not_called()
+
+    @unittest.skipIf(os.name == "nt", "Windows uses PATH for the CLI helper")
     def test_the_recorded_cli_helper_comes_before_path(self):
         root = Path.home() / ".pushary"
         runtime = _write_authorizing_helper(Path.home() / "runtime" / "node")
@@ -553,6 +581,7 @@ class HistoryTests(unittest.TestCase):
             _write_cli_helper_record(root, [str(runtime), str(entry)])
             self.assertEqual(history._registration_command("fixture"), [str(runtime), str(entry), "hermes"])
 
+    @unittest.skipIf(os.name == "nt", "Windows ignores saved helper records")
     def test_a_record_that_others_could_change_or_that_points_nowhere_is_ignored(self):
         root = Path.home() / ".pushary"
         runtime = _write_authorizing_helper(Path.home() / "runtime" / "node")
