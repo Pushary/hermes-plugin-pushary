@@ -8,6 +8,7 @@ import time
 import types
 import unittest
 import shutil
+import stat
 import shlex
 import sqlite3
 import subprocess
@@ -83,6 +84,14 @@ def _write_bridge_launcher(root):
     launcher = root / "bin" / "pushary-bridge"
     launcher.write_text('#!/bin/sh\nexec "/Applications/Pushary.app/Contents/Helpers/pushary-bridge" "$@"\n')
     launcher.chmod(0o700)
+
+
+def _write_cli_helper_record(root, command):
+    root.mkdir(parents=True, exist_ok=True)
+    record = root / history.CLI_HELPER_RECORD
+    record.write_text(json.dumps({"version": history.CLI_HELPER_RECORD_VERSION, "command": command}))
+    record.chmod(0o600)
+    return record
 
 
 def _write_authorizing_helper(path):
@@ -267,9 +276,9 @@ class HistoryTests(unittest.TestCase):
             (Path(directory) / "config.json").write_text("{}")
             self.assertEqual(history._authorized_command("fixture"), ["helper"])
             self.assertEqual(ask.call_count, 3)
-            consent.chmod(0o644)
+            consent.chmod(stat.S_IMODE(consent.stat().st_mode) ^ stat.S_IRGRP)
             history._authorized_command("fixture")
-            self.assertEqual(ask.call_count, 4)
+            self.assertEqual(ask.call_count, 4, "a permission change is re-checked")
             clock.now += history.AUTHORIZATION_LIFETIME_SECONDS
             history._authorized_command("fixture")
             self.assertEqual(ask.call_count, 5)
@@ -513,6 +522,111 @@ class HistoryTests(unittest.TestCase):
                 for reply in ["", "{}", '{"version": 1, "authorized": false}', '{"version": 2, "authorized": true}']:
                     helper.write_text("#!/bin/sh\nprintf '%s' " + shlex.quote(reply) + "\n")
                     self.assertIsNone(history._registration_command("profile-key"))
+
+    @requires_the_cli_helpers
+    @helpers_have_room_to_start
+    def test_the_recorded_cli_helper_runs_the_real_contract_without_path(self):
+        helper_source = CLI_HELPERS / "pushary-transcript-register.ts"
+        bun = shutil.which("bun")
+        self.assertIsNotNone(bun)
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(Path, "home", return_value=Path(directory)):
+            config = Path(directory) / ".pushary" / "config.json"
+            config.parent.mkdir()
+            config.write_text(json.dumps({"apiKey": "profile-key"}))
+            _write_cli_helper_record(Path(directory) / ".pushary", [bun, str(helper_source)])
+            environment = {"HOME": directory, "PUSHARY_TRANSCRIPTS": "1", "PUSHARY_BASE_URL": history.api.BASE_URL, "PATH": "/nonexistent"}
+            with mock.patch.dict("os.environ", environment), \
+                    mock.patch.object(history.shutil, "which", return_value=None):
+                os.environ.pop("PUSHARY_CONFIG_FILE", None)
+                self.assertEqual(history._registration_command("profile-key"), [bun, str(helper_source), "hermes"])
+                self.assertIsNone(history._registration_command("another-key"), "the Hermes key must be the CLI's account")
+
+    def test_the_recorded_cli_helper_comes_before_path(self):
+        root = Path.home() / ".pushary"
+        runtime = _write_authorizing_helper(Path.home() / "runtime" / "node")
+        entry = Path.home() / "package" / "pushary-transcript-register.js"
+        entry.parent.mkdir(parents=True)
+        entry.write_text("")
+        on_path = _write_authorizing_helper(Path.home() / "path-bin" / history.CLI_HELPER_NAME)
+        with mock.patch.object(history.shutil, "which", return_value=str(on_path)):
+            self.assertEqual(history._registration_command("fixture"), [str(on_path), "hermes"], "without a record PATH decides")
+            _write_cli_helper_record(root, [str(runtime), str(entry)])
+            self.assertEqual(history._registration_command("fixture"), [str(runtime), str(entry), "hermes"])
+
+    def test_a_record_that_others_could_change_or_that_points_nowhere_is_ignored(self):
+        root = Path.home() / ".pushary"
+        runtime = _write_authorizing_helper(Path.home() / "runtime" / "node")
+        entry = Path.home() / "package" / "pushary-transcript-register.js"
+        entry.parent.mkdir(parents=True)
+        entry.write_text("")
+        good = [str(runtime), str(entry)]
+        record = root / history.CLI_HELPER_RECORD
+        with mock.patch.object(history.shutil, "which", return_value=None):
+            _write_cli_helper_record(root, good)
+            self.assertIsNotNone(history._recorded_cli_helper(root))
+            record.chmod(0o644)
+            self.assertIsNone(history._recorded_cli_helper(root), "readable or writable by others")
+            for command in (["node", str(entry)], [str(runtime)], [str(runtime), str(entry), "extra"],
+                            [str(runtime), str(Path.home() / "missing.js")], [str(entry), str(entry)]):
+                _write_cli_helper_record(root, command)
+                self.assertIsNone(history._recorded_cli_helper(root), command)
+            record.write_text(json.dumps({"version": 2, "command": good}))
+            self.assertIsNone(history._recorded_cli_helper(root))
+            record.write_text("not json")
+            self.assertIsNone(history._recorded_cli_helper(root))
+            record.unlink()
+            elsewhere = Path.home() / "elsewhere.json"
+            elsewhere.write_text(json.dumps({"version": 1, "command": good}))
+            elsewhere.chmod(0o600)
+            record.symlink_to(elsewhere)
+            self.assertIsNone(history._recorded_cli_helper(root), "a linked record")
+            self.assertIsNone(history._registration_command("fixture"))
+
+    @unittest.skipIf(os.name == "nt", "ownership and FIFOs are POSIX")
+    def test_a_record_owned_by_someone_else_oversized_or_not_a_file_is_ignored(self):
+        root = Path.home() / ".pushary"
+        runtime = _write_authorizing_helper(Path.home() / "runtime" / "node")
+        entry = Path.home() / "package" / "pushary-transcript-register.js"
+        entry.parent.mkdir(parents=True)
+        entry.write_text("")
+        record = _write_cli_helper_record(root, [str(runtime), str(entry)])
+        self.assertIsNotNone(history._recorded_cli_helper(root))
+        with mock.patch.object(history.os, "getuid", return_value=os.getuid() + 1):
+            self.assertIsNone(history._recorded_cli_helper(root), "another user's record")
+        record.write_text(json.dumps({"version": 1, "command": [str(runtime), str(entry)], "padding": "x" * history.CLI_HELPER_RECORD_MAX_BYTES}))
+        self.assertIsNone(history._recorded_cli_helper(root), "larger than any record setup writes")
+        record.write_text("[" * (history.CLI_HELPER_RECORD_MAX_BYTES - 1))
+        self.assertIsNone(history._recorded_cli_helper(root), "nesting deep enough to exhaust the parser")
+        record.unlink()
+        os.mkfifo(record, 0o600)
+        self.assertIsNone(history._recorded_cli_helper(root), "a FIFO must not block the gateway")
+
+    @unittest.skipIf(os.name == "nt", "links and FIFOs are POSIX")
+    def test_a_record_swapped_after_it_was_checked_is_refused_when_opened(self):
+        root = Path.home() / ".pushary"
+        runtime = _write_authorizing_helper(Path.home() / "runtime" / "node")
+        entry = Path.home() / "package" / "pushary-transcript-register.js"
+        entry.parent.mkdir(parents=True)
+        entry.write_text("")
+        elsewhere = _write_cli_helper_record(Path.home() / "elsewhere", [str(runtime), str(entry)])
+        record = root / history.CLI_HELPER_RECORD
+        root.mkdir(parents=True)
+        regular_file = os.stat_result((stat.S_IFREG | 0o600, 0, 0, 1, os.getuid(), os.getgid(), 64, 0, 0, 0))
+        with mock.patch.object(Path, "lstat", return_value=regular_file):
+            record.symlink_to(elsewhere)
+            self.assertIsNone(history._recorded_cli_helper(root), "a link swapped in after the check")
+            record.unlink()
+            os.mkfifo(record, 0o600)
+            results = []
+            reader = threading.Thread(target=lambda: results.append(history._recorded_cli_helper(root)), daemon=True)
+            reader.start()
+            reader.join(2.0)
+            waited_for_a_writer = reader.is_alive()
+            if waited_for_a_writer:
+                os.close(os.open(record, os.O_WRONLY | os.O_NONBLOCK))
+                reader.join(2.0)
+            self.assertFalse(waited_for_a_writer, "opening a FIFO swapped in after the check must not wait for a writer")
+            self.assertEqual(results, [None])
 
     @helpers_have_room_to_start
     def test_the_history_helper_receives_only_the_environment_it_reads(self):

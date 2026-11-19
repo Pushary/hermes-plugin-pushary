@@ -50,7 +50,7 @@ from its own virtualenv. There, you can install the package with that
 virtualenv's Python and add `pushary` to `plugins.enabled`:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.4
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.5
 ```
 
 ## Setup
@@ -350,7 +350,32 @@ older incompatible schemas report an unavailable source instead of guessing.
 History requires a paired phone, history enabled, and an installed Pushary Mac
 helper or `pushary-transcript-register` CLI with export authorization support.
 Upgrade the helper alongside the plugin; older helpers cannot authorize local
-exports. Reload the plugin once after upgrading
+exports.
+
+The plugin runs inside the Hermes gateway, whose `PATH` depends on how it was
+started: Hermes Desktop passes your login shell's `PATH`, a launchd service keeps
+the `PATH` it was installed with, and a systemd service does not include npm's
+global folder. So the plugin finds the helper without relying on `PATH` where it
+can:
+
+- With the Pushary Mac app, it runs the helper inside `Pushary.app` in
+  `/Applications`, `~/Applications`, or the location the app's bridge launcher
+  recorded.
+- With the CLI, `npx pushary@latest setup --agents hermes` installs the CLI
+  globally and records the Node runtime and the helper's absolute path in
+  `~/.pushary/hermes-history-helper.json` (owner-only). If you set Hermes up with
+  an earlier release, run that setup once more; where the CLI is already installed
+  globally, `pushary upgrade` writes the record too. The plugin
+  uses that record first, then falls back to `pushary-transcript-register` on
+  `PATH`. It ignores a record that others can change, that is a link, or that
+  names a missing file.
+
+Plugins load per Hermes profile. Setup installs into the profile `hermes` uses
+(`HERMES_HOME`, else `~/.hermes/active_profile`). A profile chosen only inside
+Hermes Desktop needs its own install, for example
+`HERMES_HOME=~/.hermes/profiles/<name> npx pushary@latest setup --agents hermes`.
+
+Reload the plugin once after upgrading
 an already-running Hermes process. Starting a session or its next prompt starts
 capture; this does not wake an idle agent. A profile/account change or opting out
 stops the exporter. Remote agents need the collector in their own environment.

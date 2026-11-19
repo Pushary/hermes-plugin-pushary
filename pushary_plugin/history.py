@@ -8,6 +8,7 @@ import math
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import threading
@@ -38,6 +39,11 @@ NATIVE_HELPER_NAME = "pushary-native-transcripts"
 PUSHARY_APP_NAME = "Pushary.app"
 PUSHARY_APP_HELPER = Path("Contents") / "Helpers" / NATIVE_HELPER_NAME
 SYSTEM_APPLICATIONS = Path("/Applications")
+CLI_HELPER_NAME = "pushary-transcript-register"
+CLI_HELPER_RECORD = "hermes-history-helper.json"
+CLI_HELPER_RECORD_VERSION = 1
+CLI_HELPER_RECORD_MAX_BYTES = 8192
+CLI_HELPER_RECORD_OPEN_FLAGS = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
 
 
 class _Authorization(NamedTuple):
@@ -193,6 +199,53 @@ def _native_helper(root: Path) -> Path | None:
     return next((helper for helper in candidates if _is_executable_file(helper)), None)
 
 
+def _is_owner_only_file(info: os.stat_result) -> bool:
+    if not stat.S_ISREG(info.st_mode):
+        return False
+    return os.name == "nt" or (info.st_mode & 0o077 == 0 and info.st_uid == os.getuid())
+
+
+def _owner_only_record_text(path: Path) -> str | None:
+    if not stat.S_ISREG(path.lstat().st_mode):
+        return None
+    with os.fdopen(os.open(path, CLI_HELPER_RECORD_OPEN_FLAGS), "rb") as record:
+        info = os.fstat(record.fileno())
+        if not _is_owner_only_file(info) or info.st_size > CLI_HELPER_RECORD_MAX_BYTES:
+            return None
+        return record.read(CLI_HELPER_RECORD_MAX_BYTES + 1).decode("utf-8")
+
+
+def _is_recorded_command(value: object) -> bool:
+    if not isinstance(value, dict) or type(value.get("version")) is not int or value.get("version") != CLI_HELPER_RECORD_VERSION:
+        return False
+    command = value.get("command")
+    return isinstance(command, list) and len(command) == 2 and all(isinstance(part, str) and part for part in command)
+
+
+def _runnable_recorded_command(command: list[str]) -> list[str] | None:
+    runtime, entry = (Path(part) for part in command)
+    if not runtime.is_absolute() or not entry.is_absolute() or not _is_executable_file(runtime) or not entry.is_file():
+        return None
+    return [str(runtime), str(entry)]
+
+
+def _recorded_cli_helper(root: Path) -> list[str] | None:
+    try:
+        text = _owner_only_record_text(root / CLI_HELPER_RECORD)
+        value = None if text is None else json.loads(text)
+    except (OSError, ValueError, RecursionError):
+        return None
+    return _runnable_recorded_command(value["command"]) if _is_recorded_command(value) else None
+
+
+def _cli_helper(root: Path) -> list[str] | None:
+    recorded = _recorded_cli_helper(root)
+    if recorded is not None:
+        return recorded
+    on_path = shutil.which(CLI_HELPER_NAME)
+    return [on_path] if on_path else None
+
+
 def _registration_command(key: str) -> list[str] | None:
     root = Path.home() / ".pushary"
     try:
@@ -200,14 +253,14 @@ def _registration_command(key: str) -> list[str] | None:
             native_helper = _native_helper(root)
             if native_helper is None:
                 return None
-            helper = str(native_helper)
-            command = [helper, "register", "hermes"]
+            helper = [str(native_helper)]
+            command = [*helper, "register", "hermes"]
         else:
-            helper = shutil.which("pushary-transcript-register")
+            helper = _cli_helper(root)
             if helper is None:
                 return None
-            command = [helper, "hermes"]
-        result = subprocess.run([helper, "authorize-export"],
+            command = [*helper, "hermes"]
+        result = subprocess.run([*helper, "authorize-export"],
                                 input=json.dumps({"apiKey": key, "baseUrl": api.BASE_URL}), text=True,
                                 env=_helper_environment(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5, check=False)
         if result.returncode != 0:
@@ -232,10 +285,10 @@ def _file_state(path: Path | None) -> tuple[int, ...] | None:
 
 def _authorization_inputs(key: str) -> tuple[object, ...]:
     root = Path.home() / ".pushary"
-    helper = shutil.which("pushary-transcript-register")
+    helper = shutil.which(CLI_HELPER_NAME)
     sources = (root / "native-transcript-consent.json", root / "bridge-auth", root / "bridge-auth" / "agent-key.json",
                root / "machine-id", root / "bin" / "pushary-bridge", api.pushary_config_path(),
-               Path(helper) if helper else None)
+               Path(helper) if helper else None, root / CLI_HELPER_RECORD)
     return (key, api.BASE_URL, os.environ.get("PUSHARY_TRANSCRIPTS"), helper, *(_file_state(source) for source in sources))
 
 
