@@ -34,6 +34,10 @@ HELPER_ENVIRONMENT_NAMES = frozenset({
     "SYSTEMROOT", "PATHEXT", "COMSPEC", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",
     "PUSHARY_BASE_URL", "PUSHARY_API_URL", "PUSHARY_CONFIG_FILE", "PUSHARY_TRANSCRIPTS", "PUSHARY_TRANSCRIPT_REGISTRY_DIR",
 })
+NATIVE_HELPER_NAME = "pushary-native-transcripts"
+PUSHARY_APP_NAME = "Pushary.app"
+PUSHARY_APP_HELPER = Path("Contents") / "Helpers" / NATIVE_HELPER_NAME
+SYSTEM_APPLICATIONS = Path("/Applications")
 
 
 class _Authorization(NamedTuple):
@@ -169,12 +173,34 @@ def _registration_environment(key: str) -> dict[str, str]:
     return {**_helper_environment(), "PUSHARY_API_KEY": key, "PUSHARY_BASE_URL": api.BASE_URL}
 
 
+def _cached_pushary_app(root: Path) -> Path | None:
+    try:
+        lines = (root / "bin" / ".bridge-cache").read_text(encoding="utf-8").splitlines()
+    except (OSError, ValueError):
+        return None
+    cached = Path(lines[0].strip()) if lines and lines[0].strip() else None
+    return cached if cached is not None and cached.is_absolute() else None
+
+
+def _is_executable_file(path: Path) -> bool:
+    return path.is_file() and os.access(path, os.X_OK)
+
+
+def _native_helper(root: Path) -> Path | None:
+    bridge = (root / "bin" / "pushary-bridge").resolve(strict=True)
+    apps = (SYSTEM_APPLICATIONS / PUSHARY_APP_NAME, Path.home() / "Applications" / PUSHARY_APP_NAME, _cached_pushary_app(root))
+    candidates = (bridge.parent / NATIVE_HELPER_NAME, *(app / PUSHARY_APP_HELPER for app in apps if app is not None))
+    return next((helper for helper in candidates if _is_executable_file(helper)), None)
+
+
 def _registration_command(key: str) -> list[str] | None:
     root = Path.home() / ".pushary"
     try:
         if (root / "native-transcript-consent.json").exists():
-            bridge = (root / "bin" / "pushary-bridge").resolve(strict=True)
-            helper = str(bridge.parent / "pushary-native-transcripts")
+            native_helper = _native_helper(root)
+            if native_helper is None:
+                return None
+            helper = str(native_helper)
             command = [helper, "register", "hermes"]
         else:
             helper = shutil.which("pushary-transcript-register")
@@ -366,7 +392,10 @@ def start_history(session_id: object, parent_session_id: object = None) -> None:
         with _lock:
             if identity in _workers or len(_workers) >= 32:
                 return
-        key = api._get_api_key()
+        try:
+            key = api._get_api_key()
+        except ValueError:
+            return
         command = _authorized_command(key)
         if command is None:
             _report_history_not_allowed_once()

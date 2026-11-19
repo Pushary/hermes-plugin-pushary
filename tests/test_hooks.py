@@ -15,14 +15,17 @@ SANDBOX_HERMES_HOME = tempfile.TemporaryDirectory(prefix="pushary-hermes-home-")
 
 
 SANDBOX_HISTORY = mock.patch.object(history, "_history_root", return_value=Path(SANDBOX_HERMES_HOME.name) / "hermes-history")
+NO_INSTALLED_HISTORY_HELPER = mock.patch.object(history, "_authorized_command", return_value=None)
 
 
 def setUpModule():
     os.environ["HERMES_HOME"] = SANDBOX_HERMES_HOME.name
     SANDBOX_HISTORY.start()
+    NO_INSTALLED_HISTORY_HELPER.start()
 
 
 def tearDownModule():
+    NO_INSTALLED_HISTORY_HELPER.stop()
     SANDBOX_HISTORY.stop()
     os.environ.pop("HERMES_HOME", None)
     SANDBOX_HERMES_HOME.cleanup()

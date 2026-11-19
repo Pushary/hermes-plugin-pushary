@@ -79,11 +79,25 @@ def _touch(path, clock):
     os.utime(path, ns=(stamp, stamp))
 
 
+def _write_bridge_launcher(root):
+    launcher = root / "bin" / "pushary-bridge"
+    launcher.write_text('#!/bin/sh\nexec "/Applications/Pushary.app/Contents/Helpers/pushary-bridge" "$@"\n')
+    launcher.chmod(0o700)
+
+
+def _write_authorizing_helper(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('#!/bin/sh\ncat >/dev/null\nprintf \'{"version":1,"authorized":true}\'\n')
+    path.chmod(0o700)
+    return path
+
+
 class HistoryTests(unittest.TestCase):
     def setUp(self):
         sandbox = tempfile.TemporaryDirectory(prefix="pushary-history-home-")
         self.addCleanup(sandbox.cleanup)
         for patcher in (mock.patch.object(Path, "home", return_value=Path(sandbox.name)),
+                        mock.patch.object(history, "SYSTEM_APPLICATIONS", Path(sandbox.name) / "system-applications"),
                         mock.patch.dict(history._authorizations, clear=True), mock.patch.object(history, "_next_prune_at", 0.0),
                         mock.patch.object(history, "_history_not_allowed_reported", False)):
             patcher.start()
@@ -367,6 +381,60 @@ class HistoryTests(unittest.TestCase):
                 history.start_history("session")
                 self.assertFalse(second.exists())
 
+    def test_the_mac_app_helper_is_found_inside_the_app_behind_the_bridge_launcher(self):
+        home = Path.home()
+        root = home / ".pushary"
+        (root / "bin").mkdir(parents=True)
+        _write_bridge_launcher(root)
+        (root / "native-transcript-consent.json").write_text("{}")
+        system_app = history.SYSTEM_APPLICATIONS / history.PUSHARY_APP_NAME
+        user_app = home / "Applications" / history.PUSHARY_APP_NAME
+        cached_app = home / "Elsewhere" / history.PUSHARY_APP_NAME
+        (root / "bin" / ".bridge-cache").write_text(f"{cached_app}\n")
+        self.assertIsNone(history._registration_command("fixture"), "no installed helper means no export")
+        for app in (cached_app, user_app, system_app):
+            helper = _write_authorizing_helper(app / history.PUSHARY_APP_HELPER)
+            self.assertEqual(history._registration_command("fixture"), [str(helper), "register", "hermes"])
+        sibling = _write_authorizing_helper(root / "bin" / history.NATIVE_HELPER_NAME)
+        self.assertEqual(history._registration_command("fixture"), [str(sibling.resolve()), "register", "hermes"])
+
+    def test_a_relative_app_path_in_the_bridge_cache_is_ignored(self):
+        root = Path.home() / ".pushary"
+        (root / "bin").mkdir(parents=True)
+        (root / "bin" / ".bridge-cache").write_text(f"Relative/{history.PUSHARY_APP_NAME}\n")
+        self.assertIsNone(history._cached_pushary_app(root))
+        (root / "bin" / ".bridge-cache").write_text(f"{Path.home() / history.PUSHARY_APP_NAME}\n")
+        self.assertEqual(history._cached_pushary_app(root), Path.home() / history.PUSHARY_APP_NAME)
+
+    def test_a_helper_that_cannot_run_or_refuses_the_key_never_exports(self):
+        root = Path.home() / ".pushary"
+        (root / "bin").mkdir(parents=True)
+        _write_bridge_launcher(root)
+        (root / "native-transcript-consent.json").write_text("{}")
+        helper = _write_authorizing_helper(history.SYSTEM_APPLICATIONS / history.PUSHARY_APP_NAME / history.PUSHARY_APP_HELPER)
+        helper.chmod(0o600)
+        self.assertIsNone(history._registration_command("fixture"))
+        helper.write_text('#!/bin/sh\ncat >/dev/null\nprintf \'{"version":1,"authorized":false}\'\n')
+        helper.chmod(0o700)
+        self.assertIsNone(history._registration_command("fixture"))
+        (root / "bin" / "pushary-bridge").unlink()
+        self.assertIsNone(history._registration_command("fixture"), "the Mac app path needs its bridge launcher")
+
+    def test_a_hermes_without_its_pushary_key_starts_no_history_and_logs_nothing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            hermes = types.ModuleType("hermes_constants")
+            hermes.get_hermes_home = lambda: Path(directory)
+            missing = ValueError("PUSHARY_API_KEY is not set")
+            with mock.patch.dict(sys.modules, {"hermes_constants": hermes}), \
+                    mock.patch.dict(history._workers, clear=True), \
+                    mock.patch.object(history.api, "_get_api_key", side_effect=missing), \
+                    mock.patch.object(history, "_registration_command") as ask, \
+                    mock.patch.object(history.logger, "warning") as warning:
+                history.start_history("session")
+                self.assertEqual(history._workers, {})
+                ask.assert_not_called()
+                warning.assert_not_called()
+
     def test_native_optout_and_account_switch_prevent_even_local_export(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(Path, "home", return_value=Path(directory)):
             root = Path(directory) / ".pushary"
@@ -391,8 +459,9 @@ class HistoryTests(unittest.TestCase):
             root = Path(directory) / ".pushary"
             (root / "bridge-auth").mkdir(parents=True, mode=0o700)
             (root / "bin").mkdir()
-            (root / "bin/pushary-bridge").write_text("")
-            helper = root / "bin/pushary-native-transcripts"
+            _write_bridge_launcher(root)
+            helper = Path(directory) / "Applications" / history.PUSHARY_APP_NAME / history.PUSHARY_APP_HELPER
+            helper.parent.mkdir(parents=True)
             helper.write_text("#!/bin/sh\nexec " + shlex.quote(bun) + " " + shlex.quote(str(helper_source)) + ' "$@"\n')
             helper.chmod(0o700)
             account = {"key": "fixture", "keyScope": "agent", "siteID": "site", "machineID": "machine", "baseURL": history.api.BASE_URL}
