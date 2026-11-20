@@ -568,6 +568,109 @@ class HistoryTests(unittest.TestCase):
             self.assertIsNone(history._cli_helper(root))
             read_record.assert_not_called()
 
+    def test_windows_searches_only_the_path_npm_was_given_and_never_a_node_modules_bin_folder(self):
+        root = Path.home() / ".pushary"
+        npm = r"C:\Users\A\AppData\Roaming\npm"
+        npx = r"C:\Users\A\AppData\Local\npm-cache\_npx\1f2e3d\node_modules\.bin"
+        repository = r"C:\Users\A\repo\NODE_MODULES\.Bin"
+        marker = r"C:\Program Files\nodejs\node_modules\npm\node_modules\@npmcli\run-script\lib\node-gyp-bin"
+        users_node_gyp = r"C:\Program Files\nodejs\node_modules\npm\bin\node-gyp-bin"
+        climbed = r"C:\Users\A\repo\node_modules\.bin\..\.bin"
+        share = r"\\srv\node_modules\.bin"
+        present = {(folder + "\\" + history.CLI_HELPER_NAME + ".CMD").upper() for folder in (npm, npx, repository, climbed, share)}
+        cases = {
+            "a node-gyp-bin folder the user put on PATH after npm's is not npm's marker": ([npm, users_node_gyp, r"C:\Windows"], npm),
+            "a node_modules bin folder spelled with .. or as a share is passed over": ([climbed, share, npm], npm),
+            "npm put its global folder first, but the PATH it was given lacks it": ([npm, npx, marker, r"C:\Windows"], None),
+            "the PATH npm was given leads to the npm install": ([npx, marker, r"C:\Windows", npm], npm),
+            "an npm script run inside another keeps only the outermost PATH": ([npx, marker, npm, marker, r"C:\Windows"], None),
+            "a repository's node_modules bin folder outside npm is passed over": ([repository, npm], npm),
+            "only node_modules bin folders hold the helper": ([repository, npx], None),
+        }
+        for name, (path, expected) in cases.items():
+            with self.subTest(name), \
+                 mock.patch.object(history.os, "name", "nt"), \
+                 mock.patch.object(history, "_owner_only_record_text", return_value=None), \
+                 mock.patch.dict(os.environ, {"PATHEXT": ".CMD"}), \
+                 mock.patch.object(os, "get_exec_path", return_value=path), \
+                 mock.patch.object(os.path, "isfile", side_effect=lambda candidate: candidate.upper() in present):
+                found = history._cli_helper(root)
+                self.assertEqual(found, None if expected is None else [expected + "\\" + history.CLI_HELPER_NAME + ".CMD"])
+
+    def test_windows_reads_pathext_the_way_cli_setup_mirrors_it(self):
+        root = Path.home() / ".pushary"
+        bin_dir = r"C:\npm"
+        helper = bin_dir + "\\" + history.CLI_HELPER_NAME
+        cases = {None: helper + ".CMD", ".CMD;.EXE": helper + ".CMD", "": None, ".PS1;.JS": None, ".COM; .CMD": None}
+        for pathext, expected in cases.items():
+            with self.subTest(pathext=pathext), \
+                 mock.patch.object(history.os, "name", "nt"), \
+                 mock.patch.object(history, "_owner_only_record_text", return_value=None), \
+                 mock.patch.dict(os.environ, {} if pathext is None else {"PATHEXT": pathext}), \
+                 mock.patch.object(os, "get_exec_path", return_value=[bin_dir]), \
+                 mock.patch.object(os.path, "isfile", side_effect=lambda path: path.upper() in {(helper + ext).upper() for ext in (".CMD", ".PS1", ".JS")}):
+                if pathext is None:
+                    os.environ.pop("PATHEXT", None)
+                self.assertEqual(history._cli_helper(root), None if expected is None else [expected])
+
+    def test_windows_helpers_run_in_their_own_folder_with_the_environment_they_had(self):
+        helper = str(Path.home() / "npm" / (history.CLI_HELPER_NAME + ".cmd"))
+        folder = os.path.dirname(helper)
+        authorized = mock.Mock(returncode=0, stdout='{"version":1,"authorized":true}')
+        with mock.patch.object(history.os, "name", "nt"), \
+             mock.patch.object(history, "_cli_helper", return_value=[helper]), \
+             mock.patch.object(history.subprocess, "run", return_value=authorized) as run:
+            self.assertEqual(history._registration_command("fixture"), [helper, "hermes"])
+        self.assertEqual(run.call_args.kwargs["cwd"], folder)
+        self.assertEqual(run.call_args.kwargs["env"], history._helper_environment())
+
+        database = Path.home() / "state.db"
+        database.write_text("fixture")
+        ending = threading.Event()
+        ending.set()
+        with mock.patch.object(history.os, "name", "nt"), \
+             mock.patch.object(history.api, "_get_api_key", return_value="fixture"), \
+             mock.patch.object(history, "_authorized_command", return_value=[helper, "hermes"]), \
+             mock.patch.object(history.subprocess, "run", return_value=mock.Mock(returncode=0)) as run, \
+             mock.patch.object(history, "read_display_history", return_value=[]), \
+             mock.patch.object(history, "write_snapshot"):
+            history._export_loop(database, "session", "fixture", [helper, "hermes"], ending)
+        self.assertEqual(run.call_count, 1, "the final export registers its snapshot")
+        self.assertEqual(run.call_args.kwargs["cwd"], folder)
+        self.assertEqual(run.call_args.kwargs["env"], history._registration_environment("fixture"))
+
+    @unittest.skipIf(os.name == "nt", "Windows runs helpers in their own folder")
+    def test_posix_helpers_keep_the_working_folder_and_environment_they_had(self):
+        helper = str(Path.home() / "bin" / history.CLI_HELPER_NAME)
+        authorized = mock.Mock(returncode=0, stdout='{"version":1,"authorized":true}')
+        with mock.patch.object(history, "_cli_helper", return_value=[helper]), \
+             mock.patch.object(history.subprocess, "run", return_value=authorized) as run:
+            self.assertEqual(history._registration_command("fixture"), [helper, "hermes"])
+        self.assertIsNone(run.call_args.kwargs["cwd"])
+        self.assertEqual(run.call_args.kwargs["env"], history._helper_environment())
+
+    @unittest.skipUnless(os.name == "nt", "cmd.exe resolves a bare command name only on Windows")
+    @helpers_have_room_to_start
+    def test_windows_a_node_in_the_folder_hermes_works_in_never_runs(self):
+        node = shutil.which("node")
+        self.assertIsNotNone(node, "the npm shim needs Node on PATH")
+        with tempfile.TemporaryDirectory(prefix="pushary npm ") as npm, tempfile.TemporaryDirectory(prefix="hermes project ") as project:
+            Path(npm, "authorize.js").write_text('process.stdout.write(JSON.stringify({version: 1, authorized: true}))\n')
+            Path(npm, history.CLI_HELPER_NAME + ".cmd").write_text('@ECHO off\nnode "%~dp0authorize.js" %*\n')
+            planted = Path(project, "planted-node-ran")
+            Path(project, "node.cmd").write_text(f'@ECHO off\ntype nul > "{planted}"\necho {{"version":1,"authorized":true}}\n')
+            system = Path(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+            search = os.pathsep.join([npm, str(Path(node).parent), str(system)])
+            previous = os.getcwd()
+            os.chdir(project)
+            try:
+                with mock.patch.dict(os.environ, {"PATH": search, "PATHEXT": ".COM;.EXE;.BAT;.CMD"}):
+                    command = history._registration_command("fixture")
+            finally:
+                os.chdir(previous)
+            self.assertIsNotNone(command, "the helper on PATH authorized the export")
+            self.assertFalse(planted.exists(), "cmd.exe ran the node planted in the folder Hermes works in")
+
     @unittest.skipIf(os.name == "nt", "Windows uses PATH for the CLI helper")
     def test_the_recorded_cli_helper_comes_before_path(self):
         root = Path.home() / ".pushary"

@@ -5,6 +5,7 @@ import contextvars
 import json
 import logging
 import math
+import ntpath
 import os
 import re
 import shutil
@@ -42,6 +43,8 @@ PUSHARY_APP_NAME = "Pushary.app"
 PUSHARY_APP_HELPER = Path("Contents") / "Helpers" / NATIVE_HELPER_NAME
 SYSTEM_APPLICATIONS = Path("/Applications")
 CLI_HELPER_NAME = "pushary-transcript-register"
+NPM_PATH_MARKER = ("@npmcli", "run-script", "lib", "node-gyp-bin")
+ONE_COMMAND_BIN_FOLDER = ("node_modules", ".bin")
 CLI_HELPER_RECORD = "hermes-history-helper.json"
 CLI_HELPER_RECORD_VERSION = 1
 CLI_HELPER_RECORD_MAX_BYTES = 8192
@@ -182,6 +185,10 @@ def _helper_environment() -> dict[str, str]:
     return {name: value for name, value in os.environ.items() if name in HELPER_ENVIRONMENT_NAMES}
 
 
+def _helper_folder(command: list[str]) -> str | None:
+    return os.path.dirname(command[0]) if os.name == "nt" else None
+
+
 def _registration_environment(key: str) -> dict[str, str]:
     return {**_helper_environment(), "PUSHARY_API_KEY": key, "PUSHARY_BASE_URL": api.BASE_URL}
 
@@ -247,12 +254,23 @@ def _recorded_cli_helper(root: Path) -> list[str] | None:
     return _runnable_recorded_command(value["command"]) if _is_recorded_command(value) else None
 
 
+def _ends_with_segments(entry: str, tail: tuple[str, ...]) -> bool:
+    segments = tuple(segment.lower() for segment in ntpath.normpath(entry).split("\\") if segment)
+    return segments[-len(tail):] == tail
+
+
+def _path_before_npm_changed_it(entries: list[str]) -> list[str]:
+    markers = [index for index, entry in enumerate(entries) if _ends_with_segments(entry, NPM_PATH_MARKER)]
+    return entries[markers[-1] + 1:] if markers else entries
+
+
 def _helper_on_path() -> str | None:
     if os.name != "nt":
         return shutil.which(CLI_HELPER_NAME)
     extensions = os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(";")
-    for directory in map(PureWindowsPath, os.get_exec_path()):
-        if not directory.is_absolute():
+    for entry in _path_before_npm_changed_it(os.get_exec_path()):
+        directory = PureWindowsPath(entry)
+        if not directory.is_absolute() or _ends_with_segments(entry, ONE_COMMAND_BIN_FOLDER):
             continue
         for extension in extensions:
             if extension.upper() not in {".EXE", ".COM", ".CMD", ".BAT"}:
@@ -287,7 +305,8 @@ def _registration_command(key: str) -> list[str] | None:
             command = [*helper, "hermes"]
         result = subprocess.run([*helper, "authorize-export"],
                                 input=json.dumps({"apiKey": key, "baseUrl": api.BASE_URL}), text=True,
-                                env=_helper_environment(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5, check=False)
+                                env=_helper_environment(), cwd=_helper_folder(helper), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                timeout=5, check=False)
         if result.returncode != 0:
             return None
         authorization = json.loads(result.stdout)
@@ -442,7 +461,8 @@ def _export_loop(database_path: Path, session_id: str, key: str, command: list[s
                 payload = {"session_id": session_id, "cwd": str(database_path.parent), "transcript_path": str(path),
                            "hook_event_name": "SessionEnd" if ending else "SessionStart"}
                 result = subprocess.run(command, input=json.dumps(payload), text=True, env=_registration_environment(key),
-                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=False)
+                                        cwd=_helper_folder(command), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                        timeout=5, check=False)
                 if result.returncode != 0:
                     logger.warning("[pushary] Hermes history reader could not register")
                 next_registration = time.monotonic() + 60
