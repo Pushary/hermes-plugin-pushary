@@ -50,7 +50,7 @@ from its own virtualenv. There, you can install the package with that
 virtualenv's Python and add `pushary` to `plugins.enabled`:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.8
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.9
 ```
 
 ## Setup
@@ -70,8 +70,23 @@ setup and the Mac app keep it.
   on every turn, with a machine id. The questions you send. The approvals Hermes
   routes to Pushary, which carry the command (up to 4,000 characters) and its
   description after Hermes has redacted secrets from both. Gated tool arguments
-  redacted by Hermes first. When Hermes marks a turn as failed, the reason it
-  stopped, redacted the same way.
+  redacted by Hermes first: a summary of up to 500 characters, or for a gated
+  `terminal` call, when Pushary is not Hermes's approval transport, its
+  arguments up to 4,000 characters. With Pushary as the approval transport, a
+  gated call reaches Pushary as Hermes's own four-choice approval, carrying a
+  label instead of the command and the 500-character summary, and 1.0.9 leaves
+  that unchanged. From plugin 1.0.9 a longer command is cut so that it ends
+  with `… [truncated]`, which tells Pushary it did not see the rest, and Pushary records the approval as risky,
+  "Pushary could not check this step", because a step past the cut was never
+  read. An emoji counts as two characters toward the limit, as it does in the
+  Pushary CLI. What the phone does with that depends on the question. A yes or
+  no question (a gated `terminal` call when Pushary is not Hermes's approval
+  transport, or a Hermes approval that offers only Allow once and Deny) gets
+  the risky card on Pushary app 1.0.66 or later: its Approve asks for Face ID,
+  Touch ID or the passcode, and the notification offers Deny only. Hermes's usual four-choice approval keeps its choices, and
+  the `… [truncated]` mark at the end of the command is the only sign of the
+  cut. When Hermes marks a turn as failed, the reason it stopped, redacted the
+  same way.
 - **Machine id.** `~/.pushary/machine-id` when it exists, so Hermes and your
   other agents count as one machine. Otherwise a hash of the hostname.
 - **Files.** Messages queued in the Pushary app wait in

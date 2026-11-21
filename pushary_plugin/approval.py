@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 DECISION_LINE_MAX = 500
 ACTION_BODY_MAX = 4000
+ACTION_BODY_TRUNCATION_MARKER = "\n… [truncated]"
+UTF16_SINGLE_UNIT_MAX = 0xFFFF
 
 POLL_CEILING_SECONDS = 50.0
 WITHDRAW_RESERVE_SECONDS = 10.0
@@ -54,6 +56,30 @@ def _offered(allowed):
 
 def _command_head(command):
     return " ".join(str(command or "").split()[:2])[:80]
+
+
+def _utf16_units(character: str) -> int:
+    return 2 if ord(character) > UTF16_SINGLE_UNIT_MAX else 1
+
+
+def _utf16_length(text: str) -> int:
+    return sum(_utf16_units(character) for character in text)
+
+
+def _prefix_within_utf16_units(text: str, units: int) -> str:
+    used = 0
+    for index, character in enumerate(text):
+        used += _utf16_units(character)
+        if used > units:
+            return text[:index]
+    return text
+
+
+def cut_action_body(text: str) -> str:
+    if len(_prefix_within_utf16_units(text, ACTION_BODY_MAX)) == len(text):
+        return text
+    kept = _prefix_within_utf16_units(text, ACTION_BODY_MAX - _utf16_length(ACTION_BODY_TRUNCATION_MARKER))
+    return kept + ACTION_BODY_TRUNCATION_MARKER
 
 
 def _command_summary(command):
@@ -101,7 +127,7 @@ def _open_question(request, offered, uses_select):
         tool_name=HERMES_SHELL_TOOL,
         tool_target=_command_head(command),
         action=command[:DECISION_LINE_MAX] or None,
-        action_body=command[:ACTION_BODY_MAX] or None,
+        action_body=cut_action_body(command) or None,
         blocker=(
             f"Hermes flagged this command as {request.pattern_key}"[:DECISION_LINE_MAX]
             if request.pattern_key

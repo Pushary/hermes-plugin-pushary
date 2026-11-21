@@ -820,6 +820,94 @@ class DecisionFieldTest(unittest.TestCase):
         self.assertEqual(captured["done"], ("tests pass", "sess-9"))
 
 
+def utf16_length(text):
+    return len(text.encode("utf-16-le")) // 2
+
+
+IDENTITY_REDACTOR = types.ModuleType("agent.redact")
+IDENTITY_REDACTOR.redact_sensitive_text = lambda text, *, force, redact_url_credentials: text
+IDENTITY_REDACTOR.redact_for_egress = str
+
+LONG_COMMAND_WITH_A_DESTRUCTIVE_TAIL = "echo building the project now\n" * 200 + "rm -rf ./build"
+
+
+class ActionBodyCutTest(unittest.TestCase):
+    def setUp(self):
+        reset_state()
+
+    def _approval_body(self, command):
+        request = FakeRequest()
+        request.command = command
+        captured = {}
+        with mock.patch.object(api, "ask_user", side_effect=lambda **kw: captured.update(kw) or {"correlationId": "c1"}), \
+                mock.patch.object(api, "wait_for_answer", return_value={"answered": True, "value": "Deny"}):
+            approval.present(request)
+        return captured["action_body"]
+
+    def _gated_call_fields(self, args, tool_name="terminal"):
+        captured = {}
+
+        def fake_ask(params, **kwargs):
+            captured.update(params)
+            return json.dumps({"correlationId": "c1", "answered": True, "value": "yes"})
+
+        env = {"PUSHARY_API_KEY": "pk_test.sk_test", "PUSHARY_GATE_TOOLS": f"terminal,{tool_name}"}
+        with mock.patch.dict("sys.modules", {"agent": types.ModuleType("agent"), "agent.redact": IDENTITY_REDACTOR}), \
+                mock.patch.dict(os.environ, env), \
+                mock.patch.object(host, "_config", return_value={}), \
+                mock.patch.object(tools, "pushary_ask", fake_ask):
+            self.assertIsNone(plugin._on_pre_tool_call(tool_name, args))
+        return captured
+
+    def test_a_command_within_the_limit_is_sent_unchanged(self):
+        self.assertEqual(self._approval_body("rm -rf build && git push --force origin main"),
+                         "rm -rf build && git push --force origin main")
+
+    def test_a_command_of_exactly_the_limit_is_sent_unchanged_and_unmarked(self):
+        command = "a" * approval.ACTION_BODY_MAX
+        body = self._approval_body(command)
+        self.assertEqual(body, command)
+        self.assertFalse(body.endswith(approval.ACTION_BODY_TRUNCATION_MARKER))
+
+    def test_a_longer_command_is_cut_to_the_limit_and_ends_with_the_marker_the_server_reads(self):
+        body = self._approval_body(LONG_COMMAND_WITH_A_DESTRUCTIVE_TAIL)
+        self.assertTrue(body.endswith(approval.ACTION_BODY_TRUNCATION_MARKER))
+        self.assertEqual(utf16_length(body), approval.ACTION_BODY_MAX)
+        self.assertTrue(LONG_COMMAND_WITH_A_DESTRUCTIVE_TAIL.startswith(body[:-len(approval.ACTION_BODY_TRUNCATION_MARKER)]))
+        self.assertNotIn("rm -rf", body)
+
+    def test_one_character_past_the_limit_is_marked(self):
+        body = self._approval_body("a" * (approval.ACTION_BODY_MAX + 1))
+        self.assertTrue(body.endswith(approval.ACTION_BODY_TRUNCATION_MARKER))
+        self.assertEqual(utf16_length(body), approval.ACTION_BODY_MAX)
+
+    def test_an_emoji_counts_as_two_toward_the_limit_as_in_the_cli_cut(self):
+        fits = "\U0001F600" * (approval.ACTION_BODY_MAX // 2)
+        self.assertEqual(self._approval_body(fits), fits)
+        body = self._approval_body(fits + "\U0001F600")
+        self.assertTrue(body.endswith(approval.ACTION_BODY_TRUNCATION_MARKER))
+        self.assertLessEqual(utf16_length(body), approval.ACTION_BODY_MAX)
+        self.assertTrue(fits.startswith(body[:-len(approval.ACTION_BODY_TRUNCATION_MARKER)]))
+
+    def test_a_gated_call_sends_its_arguments_whole_when_they_fit(self):
+        self.assertEqual(self._gated_call_fields({"command": "ls -la"})["action_body"], "command: ls -la")
+
+    def test_a_gated_call_with_a_long_command_sends_it_cut_with_the_marker_the_server_reads(self):
+        captured = self._gated_call_fields({"command": LONG_COMMAND_WITH_A_DESTRUCTIVE_TAIL})
+        body = captured["action_body"]
+        self.assertTrue(body.endswith(approval.ACTION_BODY_TRUNCATION_MARKER))
+        self.assertEqual(utf16_length(body), approval.ACTION_BODY_MAX)
+        self.assertTrue(("command: " + LONG_COMMAND_WITH_A_DESTRUCTIVE_TAIL).startswith(body[:-len(approval.ACTION_BODY_TRUNCATION_MARKER)]))
+        self.assertLessEqual(len(captured["context"]), 500)
+
+    def test_a_gated_call_to_another_tool_sends_only_the_short_summary_of_its_arguments(self):
+        args = {"path": "notes.md", "content": "a" * 300 + " sk-tail-past-the-summary"}
+        captured = self._gated_call_fields(args, tool_name="write_file")
+        self.assertEqual(captured["action_body"], "path: notes.md\ncontent: " + "a" * 191 + "…")
+        self.assertEqual(captured["action_body"], captured["context"])
+        self.assertNotIn("sk-tail-past-the-summary", captured["action_body"])
+        self.assertFalse(captured["action_body"].endswith(approval.ACTION_BODY_TRUNCATION_MARKER))
+
 
 class TransportTimeoutTests(unittest.TestCase):
     def test_blocking_questions_keep_their_poll_window_but_withdrawal_is_bounded(self):

@@ -160,16 +160,37 @@ def _redact_outbound_text(text: str) -> str:
         return REDACTION_UNAVAILABLE
 
 
-def _summarize_args(args):
+def _redacted_arg_lines(args):
     if not isinstance(args, dict) or not args:
+        return []
+    return [_redact_outbound_text(f"{key}: {value}") for key, value in args.items()]
+
+
+def _summary_of(lines):
+    if not lines:
         return None
     parts = []
-    for key, value in args.items():
-        rendered = _redact_outbound_text(f"{key}: {value}")
+    for rendered in lines:
         if len(rendered) > 200:
             rendered = rendered[:200] + "…"
         parts.append(rendered)
     return "\n".join(parts)[:500]
+
+
+def _summarize_args(args):
+    return _summary_of(_redacted_arg_lines(args))
+
+
+def _shell_command_body_of(lines):
+    return approval.cut_action_body("\n".join(lines)) if lines else None
+
+
+def _runs_hermes_shell(tool_name):
+    return (tool_name or "").lower() == approval_coverage.HERMES_SHELL_TOOL
+
+
+def _gated_call_action_body(tool_name, lines):
+    return _shell_command_body_of(lines) if _runs_hermes_shell(tool_name) else _summary_of(lines)
 
 
 def _arg_target(args):
@@ -252,15 +273,15 @@ def _on_pre_tool_call(tool_name=None, args=None, session_id=None, **kwargs):
 
     try:
         budget_ms = int(host.gate_budget_seconds(_requested_gate_seconds()) * 1000)
-        summary = _summarize_args(args)
+        lines = _redacted_arg_lines(args)
         result = json.loads(tools.pushary_ask({
             "question": f"Allow Hermes to run `{tool_name}`?",
             "type": "confirm",
-            "context": summary,
+            "context": _summary_of(lines),
             "agent_name": identity.agent_name(),
             "tool_name": tool_name,
             "tool_target": _arg_target(args),
-            "action_body": summary,
+            "action_body": _gated_call_action_body(tool_name, lines),
             "wait": True,
             "timeout_ms": budget_ms,
         }))
