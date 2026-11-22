@@ -2,6 +2,29 @@
 
 Push notifications and human-in-the-loop for [Hermes Agent](https://hermes-agent.nousresearch.com/) via [Pushary](https://pushary.com).
 
+## What you get after you sign in
+
+1. Sign in and pick a plan. New customers start with a 3-day trial.
+2. Run `npx -y pushary@latest setup --agents hermes` once, or connect Hermes in the Pushary Mac app. Either installs this plugin and makes Pushary Hermes's approval transport.
+3. When Hermes needs a yes or an answer, the question arrives on your phone (the Pushary app for iOS and Android), on your Mac, or in the dashboard.
+4. You answer with one tap, or type a short reply, and Hermes keeps going. The dashboard keeps a record of what each agent asked and what you answered.
+
+Read the [Hermes guide](https://pushary.com/docs/agents/guides/hermes?utm_source=github&utm_medium=oss-adapter&utm_campaign=hermes-plugin&utm_content=readme) for each step, or see [Hermes notifications on your phone](https://pushary.com/hermes-notifications?utm_source=github&utm_medium=oss-adapter&utm_campaign=hermes-plugin&utm_content=readme).
+
+## Plans
+
+Each plan starts with a 3-day trial for new customers. During the trial, Agent, Agent Pro and Team include 5 call minutes.
+
+| Plan | Price | What you get |
+| --- | --- | --- |
+| [Agent](https://pushary.com/pricing?utm_source=github&utm_medium=oss-adapter&utm_campaign=hermes-plugin&utm_content=readme) | $9.99 a month | One person and every AI agent they run. Approve, deny or answer from your phone or Mac. 10 call minutes a month. |
+| [Agent Pro](https://pushary.com/pricing?utm_source=github&utm_medium=oss-adapter&utm_campaign=hermes-plugin&utm_content=readme) | $19.99 a month | Everything in Agent, plus unlimited notifications, budgets and priority support. 20 call minutes a month. |
+| [Team](https://pushary.com/teams?utm_source=github&utm_medium=oss-adapter&utm_campaign=hermes-plugin&utm_content=readme) | $59 a month for 5 people, $12 for each extra person | A shared record of what your team's agents asked and who answered, with export. 60 call minutes a month. |
+
+Missed the push? Pushary can call you, by default after 2 minutes, and read the request. You approve it, say no or tell the agent what to do. Calls need a confirmed phone number and work in English, German, French and Dutch. [Phone calls](https://pushary.com/calls?utm_source=github&utm_medium=oss-adapter&utm_campaign=hermes-plugin&utm_content=readme) · [Calls for Hermes](https://pushary.com/hermes-phone-call?utm_source=github&utm_medium=oss-adapter&utm_campaign=hermes-plugin&utm_content=readme) · [How calls work](https://pushary.com/docs/agents/phone-calls?utm_source=github&utm_medium=oss-adapter&utm_campaign=hermes-plugin&utm_content=readme)
+
+The two Partner tools listed under Tools need a [Partner plan](https://pushary.com/partners?utm_source=github&utm_medium=oss-adapter&utm_campaign=hermes-plugin&utm_content=readme), from $99 a month.
+
 ## Install
 
 These are operator-only shell steps:
@@ -50,7 +73,7 @@ from its own virtualenv. There, you can install the package with that
 virtualenv's Python and add `pushary` to `plugins.enabled`:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.10
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.11
 ```
 
 ## Setup
@@ -329,6 +352,12 @@ virtualenv:
 ```bash
 PYTHONPATH=.:$HOME/.hermes/hermes-agent ~/.hermes/hermes-agent/venv/bin/python3 -m unittest discover -s tests
 ```
+
+## Related repositories
+
+- [@pushary/openclaw](https://github.com/Pushary/pushary-openclaw): phone approvals for OpenClaw, another agent that often runs always on.
+- [Pushary skill](https://github.com/Pushary/pushary-skill): the skill, and `npx -y pushary@latest setup` for Claude Code, Codex, Gemini CLI and more.
+- [Pushary for Mac](https://github.com/Pushary/pushary-mac): answer from the notch on your Mac.
 
 ## License
 

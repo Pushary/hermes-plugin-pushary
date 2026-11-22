@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-plugin-pushary"
-version = "1.0.10"
+version = "1.0.11"
 description = "Pushary push notifications plugin for Hermes Agent"
 readme = "README.md"
 license = {text = "MIT"}
@@ -17,7 +17,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://pushary.com"
+Homepage = "https://pushary.com/hermes-notifications"
+Documentation = "https://pushary.com/docs/agents/guides/hermes"
 Repository = "https://github.com/Pushary/hermes-plugin-pushary"
 Issues = "https://github.com/Pushary/hermes-plugin-pushary/issues"
 
