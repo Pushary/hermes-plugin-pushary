@@ -1,7 +1,7 @@
 ---
 name: pushary-hermes
-version: 0.9.2
-description: Push notifications and human-in-the-loop for Hermes Agent. Use this whenever a running agent needs a human and no chat session is active, such as before an irreversible or destructive action, before spending money, deploying, force-pushing or deleting, when blocked on a decision outside your authority, when running unattended and you hit a genuine ambiguity, when another skill's workflow says to confirm with the user, and when a long task finishes or fails with nobody watching. Send alerts when tasks finish, ask questions (yes/no, multiple choice, or free text) via web push, and get answers from their connected devices. Use these tools proactively when the user is not actively in a chat session. Works alongside Hermes's built-in messaging platforms (Telegram, Discord, etc.) as a universal fallback channel.
+version: 0.9.3
+description: Push notifications and human-in-the-loop for Hermes Agent. Use this whenever a running agent needs a human and no chat session is active, such as before an irreversible or destructive action, before spending money, deploying, force-pushing or deleting, when blocked on a decision outside your authority, when running unattended and you hit a genuine ambiguity, when another skill's workflow says to confirm with the user, and when a long task finishes or fails with nobody watching. Send alerts when tasks finish, ask questions (yes/no, multiple choice, or free text) as push notifications, and get answers from their connected devices. Use these tools proactively when the user is not actively in a chat session. Works alongside Hermes's built-in messaging platforms (Telegram, Discord, etc.) as a universal fallback channel.
 metadata:
   hermes:
     tags: [notifications, push, human-in-the-loop, alerts, permissions]
