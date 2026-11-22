@@ -32,7 +32,7 @@ SNAPSHOT_RETENTION_SECONDS = 48 * 60 * 60
 SNAPSHOT_PRUNE_INTERVAL_SECONDS = 60 * 60
 SOURCE_UNAVAILABLE = "source_unavailable"
 HISTORY_NOT_ALLOWED_WARNING = ("[pushary] Hermes session history is not saved on this computer; it needs "
-                               "`npx pushary@latest setup` with the key Hermes uses, or Session history turned on in the Pushary Mac app")
+                               "`npx -y pushary@latest setup` with the key Hermes uses, or Session history turned on in the Pushary Mac app")
 HELPER_ENVIRONMENT_NAMES = frozenset({
     "HOME", "PATH", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
     "SYSTEMROOT", "PATHEXT", "COMSPEC", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",

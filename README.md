@@ -7,7 +7,7 @@ Push notifications and human-in-the-loop for [Hermes Agent](https://hermes-agent
 These are operator-only shell steps:
 
 ```bash
-npx pushary@latest setup --agents hermes
+npx -y pushary@latest setup --agents hermes
 ```
 
 That writes this plugin to `~/.hermes/plugins/pushary`, the folder where Hermes
@@ -21,7 +21,7 @@ Restart Hermes so it loads the plugin, then check it:
 
 ```bash
 hermes gateway restart
-npx pushary@latest doctor
+npx -y pushary@latest doctor
 ```
 
 If you installed it from Hermes's catalog (`hermes plugins install pushary`),
@@ -50,7 +50,7 @@ from its own virtualenv. There, you can install the package with that
 virtualenv's Python and add `pushary` to `plugins.enabled`:
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.9
+~/.hermes/hermes-agent/venv/bin/python -m pip install hermes-plugin-pushary==1.0.10
 ```
 
 ## Setup
@@ -60,7 +60,7 @@ profile's `.env` (`~/.hermes/.env` by default) and in the environment Hermes
 runs with. `hermes config set PUSHARY_API_KEY <your key>` saves it there. A copy
 installed from Hermes's catalog, or copied in by hand, uses only that.
 
-A copy that `npx pushary setup` or the Pushary Mac app installed, and a pip
+A copy that `npx -y pushary@latest setup` or the Pushary Mac app installed, and a pip
 install, also fall back to the key in `~/.pushary/config.json`, which is where
 setup and the Mac app keep it.
 
@@ -260,7 +260,7 @@ When Hermes loads the plugin on `docker` with no host folder, `modal`, `daytona`
 or `vercel_sandbox`, and `PUSHARY_GATE_TOOLS` does not name `terminal`, the
 plugin logs one warning with that command. It cannot tell whether a plugin
 backend such as `singularity` or `sprites` skips the check, so it stays quiet
-there; `npx pushary@latest doctor` names it.
+there; `npx -y pushary@latest doctor` names it.
 
 For an escalated per-tool gate, **Always allow** creates a standing rule for the
 whole tool name, covering its future calls with different arguments. Choose
@@ -376,7 +376,7 @@ can:
 - With the Pushary Mac app, it runs the helper inside `Pushary.app` in
   `/Applications`, `~/Applications`, or the location the app's bridge launcher
   recorded.
-- With the CLI, `npx pushary@latest setup --agents hermes` installs the CLI
+- With the CLI, `npx -y pushary@latest setup --agents hermes` installs the CLI
   globally. On macOS and Linux, it records the Node runtime and the helper's absolute path in
   `~/.pushary/hermes-history-helper.json` (owner-only). If you set Hermes up with
   an earlier release, run that setup once more; where the CLI is already installed
@@ -388,7 +388,7 @@ can:
 Plugins load per Hermes profile. Setup installs into the profile `hermes` uses
 (`HERMES_HOME`, else `~/.hermes/active_profile`). A profile chosen only inside
 Hermes Desktop needs its own install, for example
-`HERMES_HOME=~/.hermes/profiles/<name> npx pushary@latest setup --agents hermes`.
+`HERMES_HOME=~/.hermes/profiles/<name> npx -y pushary@latest setup --agents hermes`.
 
 Reload the plugin once after upgrading
 an already-running Hermes process. Starting a session or its next prompt starts

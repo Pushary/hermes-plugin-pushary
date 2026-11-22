@@ -1,6 +1,6 @@
 ---
 name: pushary-hermes
-version: 0.9.1
+version: 0.9.2
 description: Push notifications and human-in-the-loop for Hermes Agent. Use this whenever a running agent needs a human and no chat session is active, such as before an irreversible or destructive action, before spending money, deploying, force-pushing or deleting, when blocked on a decision outside your authority, when running unattended and you hit a genuine ambiguity, when another skill's workflow says to confirm with the user, and when a long task finishes or fails with nobody watching. Send alerts when tasks finish, ask questions (yes/no, multiple choice, or free text) via web push, and get answers from their connected devices. Use these tools proactively when the user is not actively in a chat session. Works alongside Hermes's built-in messaging platforms (Telegram, Discord, etc.) as a universal fallback channel.
 metadata:
   hermes:
@@ -43,9 +43,9 @@ Use an extra push only when the user requested it or a meaningful unattended res
 
 ## Setup
 
-On a Mac, the Pushary app connects Hermes: it puts this plugin in `~/.hermes/plugins/pushary` and selects Pushary as the approval transport. On any computer, `npx pushary@latest setup --agents hermes` does the same. The plugin can also come from the Hermes catalog with `hermes plugins install pushary`. Never install a second copy over one that is already there. No MCP server configuration is needed. Keep credentials out of chat and verify the paired account and device.
+On a Mac, the Pushary app connects Hermes: it puts this plugin in `~/.hermes/plugins/pushary` and selects Pushary as the approval transport. On any computer, `npx -y pushary@latest setup --agents hermes` does the same. The plugin can also come from the Hermes catalog with `hermes plugins install pushary`. Never install a second copy over one that is already there. No MCP server configuration is needed. Keep credentials out of chat and verify the paired account and device.
 
-If the `pushary_*` tools are missing from a Hermes session, the plugin did not load. Do not pip-install it into Hermes's Python: current Hermes does not load packages added that way. Ask the user to open the Pushary app and repair Hermes, or to run `npx pushary@latest setup --agents hermes`. Then they restart Hermes with `hermes gateway restart`.
+If the `pushary_*` tools are missing from a Hermes session, the plugin did not load. Do not pip-install it into Hermes's Python: current Hermes does not load packages added that way. Ask the user to open the Pushary app and repair Hermes, or to run `npx -y pushary@latest setup --agents hermes`. Then they restart Hermes with `hermes gateway restart`.
 
 ## Approvals Go to the Phone
 
