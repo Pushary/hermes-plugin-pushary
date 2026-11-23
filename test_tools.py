@@ -188,6 +188,11 @@ class PusharySchemaTests(unittest.TestCase):
 
 
 class PusharyGateTests(unittest.TestCase):
+    def setUp(self):
+        config = patch.object(pushary_plugin.host, "_config", return_value={})
+        config.start()
+        self.addCleanup(config.stop)
+
     def test_configured_gate_blocks_when_no_api_key_is_available(self):
         missing_config = str(Path(__file__).parent / "missing-pushary-config.json")
         with patch.dict(os.environ, {"PUSHARY_GATE_TOOLS": "shell", "PUSHARY_CONFIG_FILE": missing_config}, clear=True), \
