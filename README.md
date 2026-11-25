@@ -11,6 +11,14 @@ When Hermes pauses for your decision, Pushary sends the question to your phone. 
 
 Read the [Hermes guide](https://pushary.com/docs/agents/guides/hermes?utm_source=github&utm_medium=oss-adapter&utm_campaign=hermes-plugin&utm_content=readme) for each step, or see [Hermes notifications on your phone](https://pushary.com/hermes-notifications?utm_source=github&utm_medium=oss-adapter&utm_campaign=hermes-plugin&utm_content=readme).
 
+### Try one question
+
+Once you’ve paired your phone and restarted Hermes, paste this into a new session:
+
+> Use pushary_ask to ask me “Did this reach your phone?” Wait for my answer and tell me what I picked.
+
+Tap **No** on your phone. Seeing that answer back in the same Hermes session checks the return path, too. This question runs no command.
+
 ## Plans
 
 Each plan starts with a 3-day trial for new customers. During the trial, Agent, Agent Pro and Team include 5 call minutes.
